@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Empacotamento (PyInstaller)
+build/
+dist/
+*.spec
+
+# Temporarios do proprio app
+.renomear_tmp_*
+
+# Sistema
+Thumbs.db
+.DS_Store
+desktop.ini
