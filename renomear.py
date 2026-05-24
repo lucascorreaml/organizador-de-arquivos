@@ -19,6 +19,7 @@ import sys
 import uuid
 import shutil
 import socket
+import tempfile
 import datetime
 import mimetypes
 import threading
@@ -365,15 +366,29 @@ def pick_folder_tk(initialdir=None):
 
 
 def choose_folder_dialog(start=None):
+    """Chama este mesmo programa em subprocesso (modo --pick) e devolve a pasta.
+
+    A pasta escolhida e gravada num arquivo temporario (mais robusto que stdout
+    quando o programa esta empacotado como .exe sem console).
+    """
+    fd, tmp = tempfile.mkstemp(suffix=".txt", prefix="renomear_pick_")
+    os.close(fd)
     try:
-        out = subprocess.run(
-            [sys.executable, os.path.abspath(__file__), "--pick", start or ""],
-            capture_output=True, timeout=600,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        return out.stdout.decode("utf-8", "replace").strip()
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--pick", start or "", tmp]
+        else:
+            cmd = [sys.executable, os.path.abspath(__file__), "--pick", start or "", tmp]
+        subprocess.run(cmd, timeout=600,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        with open(tmp, "r", encoding="utf-8") as f:
+            return f.read().strip()
     except Exception:
         return ""
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -561,22 +576,62 @@ def find_free_port():
     return port
 
 
+def _control_window(url, server):
+    """Janelinha de controle (usada quando rodando como .exe sem console)."""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.title("Central de Arquivos")
+        root.geometry("400x170")
+        root.resizable(False, False)
+        tk.Label(root, text="Central de Arquivos está rodando",
+                 font=("Segoe UI", 12, "bold")).pack(pady=(20, 6))
+        tk.Label(root, text="O app abriu no seu navegador.").pack()
+        tk.Label(root, text="Feche esta janela para encerrar o programa.",
+                 fg="#555").pack(pady=(2, 10))
+        tk.Button(root, text="Abrir no navegador novamente",
+                  command=lambda: webbrowser.open(url)).pack()
+
+        def on_close():
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+            root.destroy()
+            os._exit(0)
+
+        root.protocol("WM_DELETE_WINDOW", on_close)
+        root.mainloop()
+    except Exception:
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+
+
 def main():
     port = find_free_port()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print("=" * 56)
-    print("  Central de Arquivos")
-    print("=" * 56)
-    print(f"  Aberto no navegador: {url}")
-    print("  Deixe esta janela aberta enquanto usa o app.")
-    print("  Para encerrar: feche esta janela.")
-    print("=" * 56)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+
+    if getattr(sys, "frozen", False):
+        # empacotado como .exe (sem console): janelinha de controle
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        _control_window(url, server)
+    else:
+        # rodando via Renomear.bat (com console)
+        print("=" * 56)
+        print("  Central de Arquivos")
+        print("=" * 56)
+        print(f"  Aberto no navegador: {url}")
+        print("  Deixe esta janela aberta enquanto usa o app.")
+        print("  Para encerrar: feche esta janela.")
+        print("=" * 56)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -1266,10 +1321,19 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--pick":
         initial = sys.argv[2] if len(sys.argv) >= 3 else ""
-        try:
-            sys.stdout.buffer.write(pick_folder_tk(initial).encode("utf-8"))
-            sys.stdout.buffer.flush()
-        except Exception:
-            pass
+        outfile = sys.argv[3] if len(sys.argv) >= 4 else ""
+        path = pick_folder_tk(initial)
+        if outfile:
+            try:
+                with open(outfile, "w", encoding="utf-8") as f:
+                    f.write(path)
+            except Exception:
+                pass
+        else:
+            try:
+                sys.stdout.buffer.write(path.encode("utf-8"))
+                sys.stdout.buffer.flush()
+            except Exception:
+                pass
         sys.exit(0)
     main()
