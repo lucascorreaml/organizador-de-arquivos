@@ -2,7 +2,7 @@
 
 Aplicativo **local** para **renomear, criar, organizar e catalogar** arquivos e pastas, com uma interface simples que abre no navegador. Tudo roda no seu computador — **nada é enviado para a internet**.
 
-> Feito em **Python** (apenas a biblioteca padrão) + **HTML**. Sem dependências externas, sem `pip install`.
+> Feito em **Python** + **HTML**. Usa quase só a biblioteca padrão; a única dependência externa é a **pypdf** (para dividir PDFs) — que já vem **embutida** no `.exe`.
 
 ---
 
@@ -18,6 +18,7 @@ O app é organizado em abas:
 | **Criar** | Cria várias **pastas ou arquivos em branco** de uma vez (com numeração automática opcional). |
 | **Organizar** | Move os arquivos soltos para subpastas **automaticamente**, por tipo (Imagens, Documentos, Planilhas…) ou por data (ano-mês). |
 | **Exportar lista** | Gera um inventário da pasta em **TXT** ou **CSV**. |
+| **Dividir PDF** | Abre um PDF (com pré-visualização) e o **separa em vários arquivos** por faixas de páginas (página inicial/final + nome), com até 250 cortes de uma vez. |
 
 Extras: botão **Desfazer** (para renomear, criar e organizar) e **prévia/confirmação** antes de aplicar qualquer mudança.
 
@@ -37,6 +38,7 @@ Requer Python 3 instalado.
 ```bash
 git clone https://github.com/lucascorreaml/organizador-de-arquivos.git
 cd organizador-de-arquivos
+pip install pypdf
 python renomear.py
 ```
 No Windows, também é possível usar o atalho **`Renomear.bat`** (dois cliques).
@@ -49,9 +51,9 @@ O app roda **localmente** na sua máquina e só acessa as pastas que você escol
 
 ## 🛠️ Tecnologia
 
-- **Python** — somente a biblioteca padrão (`http.server`, `tkinter`, etc.).
+- **Python** — biblioteca padrão (`http.server`, `tkinter`, etc.) + **pypdf** (divisão de PDFs).
 - Interface em **HTML/CSS/JS** embutida, servida localmente em `127.0.0.1`.
-- Empacotado como `.exe` com **PyInstaller**.
+- Empacotado como `.exe` com **PyInstaller** (a pypdf vai junto, embutida).
 
 ## 📄 Licença
 

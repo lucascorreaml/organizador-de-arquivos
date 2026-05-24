@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Central de Arquivos — motor local.
+Organizador de Arquivos — motor local.
 
 Aplicativo com varias ferramentas para arquivos e pastas (renomear, renomear em
 lote, criar, organizar, exportar lista) + pre-visualizacao de arquivos.
@@ -340,6 +340,78 @@ def export_list(folder, recursive, fmt):
 
 
 # ----------------------------------------------------------------------------
+# Dividir PDF (usa a biblioteca pypdf)
+# ----------------------------------------------------------------------------
+
+def pdf_info(path):
+    if not path or not os.path.isfile(path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader
+    reader = PdfReader(path, strict=False)
+    return {"pages": len(reader.pages), "name": os.path.basename(path),
+            "folder": os.path.dirname(os.path.abspath(path))}
+
+
+def _unique_name(folder, fname):
+    base, ext = os.path.splitext(fname)
+    cand, k = fname, 2
+    while os.path.exists(os.path.join(folder, cand)):
+        cand = f"{base} ({k}){ext}"
+        k += 1
+    return cand
+
+
+def pdf_split(pdf_path, dest_folder, ranges):
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(pdf_path, strict=False)
+    total = len(reader.pages)
+
+    plan, problems, seen = [], [], set()
+    for idx, r in enumerate(ranges):
+        name = (r.get("name", "") or "").strip()
+        s_raw = str(r.get("start", "")).strip()
+        e_raw = str(r.get("end", "")).strip()
+        if not (s_raw or e_raw or name):
+            continue  # caixa vazia: ignora
+        if not name:
+            problems.append({"row": idx + 1, "reason": "Nome do arquivo vazio."}); continue
+        try:
+            s, e = int(s_raw), int(e_raw)
+        except ValueError:
+            problems.append({"row": idx + 1, "reason": "Paginas precisam ser numeros."}); continue
+        fname = name if name.lower().endswith(".pdf") else name + ".pdf"
+        ok, reason = validate_name(fname)
+        if not ok:
+            problems.append({"row": idx + 1, "reason": reason}); continue
+        if s < 1 or e > total or s > e:
+            problems.append({"row": idx + 1, "reason": f"Faixa invalida (o PDF tem {total} paginas)."}); continue
+        key = fname.lower()
+        if key in seen:
+            problems.append({"row": idx + 1, "reason": f'Nome repetido: "{fname}".'}); continue
+        seen.add(key)
+        plan.append((s, e, fname))
+
+    if problems:
+        return {"ok": False, "problems": problems, "total": total}
+    if not plan:
+        return {"ok": False, "problems": [{"row": 0, "reason": "Nenhuma caixa preenchida."}], "total": total}
+
+    os.makedirs(dest_folder, exist_ok=True)
+    results = []
+    for s, e, fname in plan:
+        writer = PdfWriter()
+        for p in range(s - 1, e):
+            writer.add_page(reader.pages[p])
+        final = _unique_name(dest_folder, fname)
+        with open(os.path.join(dest_folder, final), "wb") as f:
+            writer.write(f)
+        results.append({"name": final, "pages": f"{s}-{e}", "count": e - s + 1})
+    return {"ok": True, "results": results, "dest": dest_folder, "total": total}
+
+
+# ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
 
@@ -350,34 +422,40 @@ UNDO_STACK = []
 # Seletor de pasta nativo (tkinter, em subprocesso p/ vir ao topo)
 # ----------------------------------------------------------------------------
 
-def pick_folder_tk(initialdir=None):
+def pick_path_tk(kind="folder", initialdir=None):
     import tkinter as tk
     from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", 1)
     root.update()
-    kw = {"title": "Escolha a pasta", "mustexist": True, "parent": root}
-    if initialdir and os.path.isdir(initialdir):
-        kw["initialdir"] = initialdir
-    path = filedialog.askdirectory(**kw)
+    ini = initialdir if (initialdir and os.path.isdir(initialdir)) else None
+    if kind == "file":
+        path = filedialog.askopenfilename(
+            title="Escolha o arquivo PDF", parent=root,
+            filetypes=[("PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+            initialdir=ini)
+    else:
+        kw = {"title": "Escolha a pasta", "mustexist": True, "parent": root}
+        if ini:
+            kw["initialdir"] = ini
+        path = filedialog.askdirectory(**kw)
     root.destroy()
     return path or ""
 
 
-def choose_folder_dialog(start=None):
-    """Chama este mesmo programa em subprocesso (modo --pick) e devolve a pasta.
+def choose_path_dialog(kind="folder", start=None):
+    """Chama este mesmo programa em subprocesso (modo --pick) e devolve o caminho.
 
-    A pasta escolhida e gravada num arquivo temporario (mais robusto que stdout
-    quando o programa esta empacotado como .exe sem console).
+    O resultado e gravado num arquivo temporario (robusto em .exe sem console).
     """
     fd, tmp = tempfile.mkstemp(suffix=".txt", prefix="renomear_pick_")
     os.close(fd)
     try:
         if getattr(sys, "frozen", False):
-            cmd = [sys.executable, "--pick", start or "", tmp]
+            cmd = [sys.executable, "--pick", kind, start or "", tmp]
         else:
-            cmd = [sys.executable, os.path.abspath(__file__), "--pick", start or "", tmp]
+            cmd = [sys.executable, os.path.abspath(__file__), "--pick", kind, start or "", tmp]
         subprocess.run(cmd, timeout=600,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         with open(tmp, "r", encoding="utf-8") as f:
@@ -389,6 +467,10 @@ def choose_folder_dialog(start=None):
             os.remove(tmp)
         except OSError:
             pass
+
+
+def choose_folder_dialog(start=None):
+    return choose_path_dialog("folder", start)
 
 
 # ----------------------------------------------------------------------------
@@ -520,6 +602,31 @@ class Handler(BaseHTTPRequestHandler):
                                                 data.get("format", "txt"))
                 self._send(200, {"ok": True, "content": content, "filename": filename})
 
+            elif self.path == "/api/choose-file":
+                path = choose_path_dialog("file", data.get("start"))
+                if not path:
+                    self._send(200, {"cancelled": True})
+                    return
+                self._send(200, {"path": path})
+
+            elif self.path == "/api/pdf-info":
+                try:
+                    self._send(200, {"ok": True, **pdf_info(data.get("path", ""))})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-split":
+                pdf = data.get("pdf", "")
+                dest = data.get("dest", "") or (os.path.dirname(pdf) if pdf else "")
+                sub = (data.get("subfolder") or "").strip()
+                if sub:
+                    ok, reason = validate_name(sub)
+                    if not ok:
+                        self._send(200, {"ok": False, "problems": [{"row": 0, "reason": f"Subpasta invalida: {reason}"}]})
+                        return
+                    dest = os.path.join(dest, sub)
+                self._send(200, pdf_split(pdf, dest, data.get("ranges", [])))
+
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
                     self._send(200, {"ok": False, "error": "Nada para desfazer."})
@@ -581,10 +688,10 @@ def _control_window(url, server):
     try:
         import tkinter as tk
         root = tk.Tk()
-        root.title("Central de Arquivos")
+        root.title("Organizador de Arquivos")
         root.geometry("400x170")
         root.resizable(False, False)
-        tk.Label(root, text="Central de Arquivos está rodando",
+        tk.Label(root, text="Organizador de Arquivos está rodando",
                  font=("Segoe UI", 12, "bold")).pack(pady=(20, 6))
         tk.Label(root, text="O app abriu no seu navegador.").pack()
         tk.Label(root, text="Feche esta janela para encerrar o programa.",
@@ -622,7 +729,7 @@ def main():
     else:
         # rodando via Renomear.bat (com console)
         print("=" * 56)
-        print("  Central de Arquivos")
+        print("  Organizador de Arquivos")
         print("=" * 56)
         print(f"  Aberto no navegador: {url}")
         print("  Deixe esta janela aberta enquanto usa o app.")
@@ -643,109 +750,116 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Central de Arquivos</title>
+<title>Organizador de Arquivos</title>
 <style>
-  body{font-family:"Times New Roman",Times,serif;color:#000;background:#fff;margin:26px;font-size:19px;line-height:1.55}
+  body{font-family:"Times New Roman",Times,serif;color:#000;background:#fff;margin:24px;font-size:17px;line-height:1.5}
   .wrap{max-width:1860px;margin:0 auto}
-  h1{font-size:32px;font-weight:bold;margin:0 0 4px}
-  .sub{font-style:italic;margin:0 0 12px;font-size:17px}
-  hr{border:0;border-top:1px solid #000;margin:14px 0}
+  h1{font-size:27px;font-weight:bold;margin:0 0 4px}
+  .sub{font-style:italic;margin:0 0 12px;font-size:15px}
+  hr{border:0;border-top:1px solid #000;margin:13px 0}
   a{color:#000}
   a:hover{background:#eee}
 
   .tabs{margin:0 0 6px}
-  .tab{font-family:inherit;font-size:20px;color:#000;background:none;border:0;padding:0 5px;cursor:pointer;text-decoration:underline}
+  .tab{font-family:inherit;font-size:17px;color:#000;background:none;border:0;padding:0 5px;cursor:pointer;text-decoration:underline}
   .tab:hover{background:#eee}
   .tab.active{font-weight:bold;text-decoration:none}
   .tabsep{color:#000}
   .panel{display:none}
   .panel.active{display:block}
 
-  button{font-family:inherit;font-size:18px;color:#000;background:#fff;border:1px solid #000;padding:6px 14px;cursor:pointer}
+  button{font-family:inherit;font-size:15px;color:#000;background:#fff;border:1px solid #000;padding:5px 12px;cursor:pointer}
   button:hover{background:#eee}
   button:disabled{color:#999;border-color:#999;cursor:not-allowed;background:#fff}
   .btn-primary{font-weight:bold}
-  .btn-link{border:0;background:none;padding:0;text-decoration:underline;font-size:18px;cursor:pointer}
+  .btn-link{border:0;background:none;padding:0;text-decoration:underline;font-size:15px;cursor:pointer}
   .btn-link:hover{background:#eee}
 
   .toolbar{margin:10px 0}
   .toolbar button{margin-right:5px;margin-bottom:4px}
-  .pathbox{display:inline-block;border:1px solid #000;padding:6px 10px;font-style:italic;font-size:16px;max-width:760px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
-  .crumbs{margin:10px 0;min-height:24px;font-size:18px}
+  .pathbox{display:inline-block;padding:5px 2px;font-style:italic;font-size:13.5px;color:#555;max-width:760px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+  .crumbs{margin:9px 0;min-height:22px;font-size:15px}
   .crumbs .c{cursor:pointer;text-decoration:underline}
   .crumbs .cur{font-weight:bold}
   .crumbs .sep{margin:0 5px}
 
   table{border-collapse:collapse;width:100%}
-  th,td{border:1px solid #000;padding:9px 12px;text-align:left;vertical-align:top}
-  th{font-weight:bold}
+  th,td{border:0;border-bottom:1px solid #ddd;padding:7px 10px;text-align:left;vertical-align:top}
+  th{font-weight:bold;border-bottom:2px solid #000}
   tbody tr.sel td{background:#eee}
-  .colw-num{width:36px;text-align:right;color:#555}
-  .tag{font-style:italic;font-size:15px;color:#333}
-  .ftype{font-style:italic;font-size:15px;color:#555;margin-top:2px}
+  .colw-num{width:32px;text-align:right;color:#555}
+  .tag{font-style:italic;font-size:13px;color:#333}
+  .ftype{font-style:italic;font-size:13px;color:#555;margin-top:2px}
   .cur{word-break:break-word}
   .cur.dir{font-weight:bold}
   .fname{cursor:pointer;text-decoration:underline;word-break:break-word}
   .newcell{word-break:break-word}
-  .empty{border:1px solid #000;padding:42px 14px;text-align:center;font-style:italic;font-size:18px}
-  .legend{font-style:italic;font-size:16px;margin-top:8px}
+  .empty{padding:30px 14px;text-align:center;font-style:italic;font-size:15px;color:#777}
+  .legend{font-style:italic;font-size:13.5px;margin-top:7px}
 
-  input[type=text],input[type=number],textarea,select{font-family:inherit;font-size:18px;color:#000;background:#fff;border:1px solid #000;padding:6px 8px}
+  input[type=text],input[type=number],textarea,select{font-family:inherit;font-size:15px;color:#000;background:#fff;border:1px solid #000;padding:5px 8px}
   input[type=text]{width:100%}
   input.bad{border:2px solid #000;background:#eee}
-  textarea{width:100%;min-height:230px;line-height:1.55}
+  textarea{width:100%;min-height:210px;line-height:1.5}
 
-  .row-msg{font-size:16px;margin-top:5px}
+  .row-msg{font-size:13.5px;margin-top:5px}
   .msg-err{font-weight:bold}
-  .sugg{font-family:inherit;border:1px solid #000;background:#fff;cursor:pointer;font-size:16px;padding:2px 8px;margin-left:6px}
+  .sugg{font-family:inherit;border:1px solid #000;background:#fff;cursor:pointer;font-size:13.5px;padding:2px 8px;margin-left:6px}
   .sugg:hover{background:#000;color:#fff}
-  .badge{font-size:16px}
+  .badge{font-size:13.5px}
   .b-same{color:#777}
   .b-ok{font-style:italic}
   .b-err{font-weight:bold}
 
-  .field{margin:14px 0}
+  .field{margin:12px 0}
   .lbl{display:block;font-weight:bold;margin-bottom:5px}
-  .opts{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center}
+  .opts{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
   .opt{display:flex;align-items:center;gap:6px}
-  .row2{display:flex;gap:20px;flex-wrap:wrap}
-  .row2>div{flex:1;min-width:220px}
-  .box{border:1px solid #000;padding:14px 16px;margin:12px 0}
+  .row2{display:flex;gap:18px;flex-wrap:wrap}
+  .row2>div{flex:1;min-width:210px}
+  .box{background:#f6f6f6;padding:12px 14px;margin:11px 0}
 
-  .actionbar{margin-top:14px}
+  .actionbar{margin-top:12px}
   .actionbar button{margin-left:5px;margin-bottom:4px}
-  .count{font-style:italic;font-size:17px}
+  .count{font-style:italic;font-size:14.5px}
 
-  .rnlayout{display:flex;gap:30px;align-items:flex-start}
+  .rnlayout{display:flex;gap:26px;align-items:flex-start}
   .rnleft{flex:4;min-width:0}
   .rnright{flex:6;min-width:0;position:sticky;top:12px}
-  .preview-box{border:1px solid #000;padding:12px;min-height:620px;max-height:88vh;overflow:auto}
+  .preview-box{border:1px solid #000;padding:12px;min-height:560px;max-height:86vh;overflow:auto}
   .preview-box img{max-width:100%;height:auto;display:block}
-  .preview-box iframe{width:100%;height:84vh;min-height:700px;border:1px solid #000}
-  .preview-box pre{white-space:pre-wrap;word-break:break-word;font-family:"Courier New",monospace;font-size:15px;margin:0}
+  .preview-box iframe{width:100%;height:82vh;min-height:640px;border:0}
+  .preview-box pre{white-space:pre-wrap;word-break:break-word;font-family:"Courier New",monospace;font-size:13.5px;margin:0}
   @media(max-width:1100px){.rnlayout{display:block}.rnright{flex:auto;position:static;margin-top:16px}}
 
-  .cols{display:flex;gap:26px;align-items:flex-start}
-  .cols .col{flex:1;min-width:0}
-  .xltext{width:100%;min-height:480px;white-space:pre;line-height:1.7;font-size:18px}
-  @media(max-width:760px){.cols{display:block}.xltext{min-height:260px}}
+  /* aba Dividir PDF: campos a esquerda (maior), preview a direita (menor) */
+  .pdlayout{display:flex;gap:26px;align-items:flex-start}
+  .pdmain{flex:6;min-width:0}
+  .pdside{flex:4;min-width:0;position:sticky;top:12px}
+  @media(max-width:1100px){.pdlayout{display:block}.pdside{position:static;margin-top:16px}}
 
-  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #000;padding:10px 18px;font-size:17px;display:none;z-index:50}
+  .cols{display:flex;gap:22px;align-items:flex-start}
+  .cols .col{flex:1;min-width:0}
+  .xltext{width:100%;min-height:440px;white-space:pre;line-height:1.6;font-size:15px}
+  @media(max-width:760px){.cols{display:block}.xltext{min-height:240px}}
+  .pgin{width:108px}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #000;padding:9px 16px;font-size:14.5px;display:none;z-index:50}
   .toast.show{display:block}
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
   .modal-bg.show{display:flex}
-  .modal{background:#fff;border:2px solid #000;max-width:720px;width:100%;max-height:84vh;overflow:auto;padding:22px}
-  .modal h3{margin:0 0 8px;font-size:22px}
-  .modal .pv{border:1px solid #000;padding:12px;margin:12px 0;font-family:"Courier New",monospace;font-size:15px}
+  .modal{background:#fff;border:2px solid #000;max-width:680px;width:100%;max-height:84vh;overflow:auto;padding:20px}
+  .modal h3{margin:0 0 8px;font-size:19px}
+  .modal .pv{background:#f6f6f6;padding:12px;margin:11px 0;font-family:"Courier New",monospace;font-size:13.5px}
   .pv .line{padding:3px 0}
-  .modal .acts{margin-top:12px;text-align:right}
+  .modal .acts{margin-top:11px;text-align:right}
   .modal .acts button{margin-left:6px}
-  .hint{font-style:italic;margin:0;font-size:17px}
+  .hint{font-style:italic;margin:0;font-size:14.5px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Central de Arquivos</h1>
+  <h1>Organizador de Arquivos</h1>
   <p class="sub">Ferramentas para renomear, criar, organizar e catalogar arquivos e pastas.</p>
 
   <p class="tabs">
@@ -754,7 +868,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="excel">Colar do Excel</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="create">Criar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="organize">Organizar</button> <span class="tabsep">|</span>
-    <button class="tab" data-tab="export">Exportar lista</button>
+    <button class="tab" data-tab="export">Exportar lista</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="pdf">Dividir PDF</button>
   </p>
   <hr>
 
@@ -939,6 +1054,43 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="actionbar">
       <span class="count" id="exCount">Escolha uma pasta.</span>
       <button id="exGen" disabled class="btn-primary">Gerar e baixar</button>
+    </div>
+  </section>
+
+  <!-- ===== DIVIDIR PDF ===== -->
+  <section class="panel" id="panel-pdf">
+    <div class="pdlayout">
+      <div class="pdmain">
+        <div class="toolbar">
+          <button class="btn-primary" id="pdPick">Escolher PDF</button>
+          <span class="pathbox" id="pdPath">Nenhum PDF selecionado</span>
+        </div>
+        <div class="box">
+          <div class="opts">
+            <button id="pdDestBtn">Escolher pasta de destino</button>
+            <span class="pathbox" id="pdDest">(padrão: a mesma pasta do PDF)</span>
+          </div>
+          <div class="opts" style="margin-top:10px">
+            <label class="opt"><input type="checkbox" id="pdSubChk" checked> Salvar numa subpasta:</label>
+            <input type="text" id="pdSubName" value="Separados" style="width:220px">
+          </div>
+        </div>
+        <p class="hint">Preencha, em cada caixa, a página inicial, a final e o nome do arquivo a gerar. Caixas vazias são ignoradas.</p>
+        <div id="pdBoxes"></div>
+        <div style="margin-top:10px">
+          <button id="pdAddBtn">+ Adicionar caixas</button>
+          <span class="hint">(até 250 caixas no total)</span>
+        </div>
+        <div class="actionbar">
+          <span class="count" id="pdCount">Escolha um PDF para começar.</span>
+          <button id="pdSplit" disabled class="btn-primary">Separar PDF</button>
+        </div>
+        <div id="pdResult"></div>
+      </div>
+      <div class="pdside">
+        <p style="margin:0 0 4px"><b>Pré-visualização do PDF</b></p>
+        <div class="preview-box" id="pdPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
+      </div>
     </div>
   </section>
 
@@ -1279,6 +1431,112 @@ q("xlUndo").addEventListener("click",undoLast);
 ["xlCurrent","xlNew"].forEach((a,i)=>{const b=["xlCurrent","xlNew"][1-i];q(a).addEventListener("scroll",()=>{const o=q(b);if(o.scrollTop!==q(a).scrollTop)o.scrollTop=q(a).scrollTop;});});
 
 // ===================================================================
+//  DIVIDIR PDF
+// ===================================================================
+const PD={pdf:null,pages:0,dest:null,data:[]};
+function pdReadInputs(){
+  PD.data.forEach((b,i)=>{
+    const s=q("pd-s-"+i),e=q("pd-e-"+i),n=q("pd-n-"+i);
+    if(s)b.start=s.value; if(e)b.end=e.value; if(n)b.name=n.value;
+  });
+}
+function pdRender(){
+  const area=q("pdBoxes");let rows="";
+  PD.data.forEach((b,i)=>{
+    rows+=`<tr>
+      <td class="colw-num">${i+1}</td>
+      <td><input type="number" class="pgin" id="pd-s-${i}" min="1" value="${escA(b.start)}" placeholder="1"></td>
+      <td><input type="number" class="pgin" id="pd-e-${i}" min="1" value="${escA(b.end)}" placeholder="${PD.pages||''}"></td>
+      <td><input type="text" id="pd-n-${i}" value="${escA(b.name)}" placeholder="ex.: Parte ${i+1}" spellcheck="false"></td>
+      <td><span class="badge b-same" id="pd-b-${i}">—</span></td>
+    </tr>`;
+  });
+  area.innerHTML=`<table><thead><tr><th class="colw-num">#</th><th>Pág. inicial</th><th>Pág. final</th><th>Nome do arquivo (.pdf)</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+  area.querySelectorAll("input").forEach(inp=>inp.addEventListener("input",()=>{pdReadInputs();pdValidate();}));
+  pdValidate();
+}
+function pdAdd(n){
+  pdReadInputs();
+  n=Math.max(0,Math.min(n,250-PD.data.length));
+  for(let i=0;i<n;i++)PD.data.push({start:"",end:"",name:""});
+  pdRender();
+  if(PD.data.length>=250)toast("Limite de 250 caixas atingido.");
+}
+function pdValidate(){
+  let valid=0,bad=0,filled=0;const seen={};
+  PD.data.forEach((b,i)=>{
+    const bdg=q("pd-b-"+i);if(!bdg)return;
+    const s=(b.start+"").trim(),e=(b.end+"").trim(),n=(b.name+"").trim();
+    if(!(s||e||n)){bdg.className="badge b-same";bdg.textContent="—";return;}
+    filled++;
+    let err="";
+    if(!s||!e||!n)err="preencha início, fim e nome";
+    else{
+      const si=parseInt(s,10),ei=parseInt(e,10);
+      if(isNaN(si)||isNaN(ei))err="páginas inválidas";
+      else if(PD.pages&&(si<1||ei>PD.pages))err="fora de 1–"+PD.pages;
+      else if(si>ei)err="início maior que fim";
+      else{
+        let fn=n.toLowerCase().endsWith(".pdf")?n:n+".pdf";
+        const [ok,reason]=validateName(fn);
+        if(!ok)err=reason;
+        else{const k=fn.toLowerCase();if(seen[k])err="nome repetido";else seen[k]=1;}
+      }
+    }
+    if(err){bad++;bdg.className="badge b-err";bdg.textContent="⚠ "+err;}
+    else{valid++;bdg.className="badge b-ok";bdg.textContent="ok";}
+  });
+  const lbl=q("pdCount");
+  if(!PD.pdf)lbl.textContent="Escolha um PDF para começar.";
+  else if(valid)lbl.innerHTML=`<b>${valid}</b> arquivo(s) a gerar`+(bad?` — ${bad} com problema`:"");
+  else lbl.textContent=filled?"Há caixas com problema":"Preencha ao menos uma caixa";
+  q("pdSplit").disabled=!PD.pdf||valid===0||bad>0;
+}
+q("pdPick").addEventListener("click",async()=>{
+  q("pdPick").disabled=true;
+  const r=await api("/api/choose-file",{start:PD.dest});
+  q("pdPick").disabled=false;
+  if(r.cancelled)return;if(r.error){toast(r.error);return;}
+  const info=await api("/api/pdf-info",{path:r.path});
+  if(!info.ok){toast(info.error||"Não consegui ler este PDF.");return;}
+  PD.pdf=r.path;PD.pages=info.pages;PD.dest=info.folder;
+  q("pdPath").textContent=info.name+"  ("+info.pages+" páginas)";q("pdPath").title=r.path;
+  q("pdDest").textContent=info.folder;q("pdDest").title=info.folder;
+  q("pdPrev").innerHTML='<iframe src="/file?path='+encodeURIComponent(r.path)+'"></iframe>';
+  pdRender();
+  toast("PDF com "+info.pages+" páginas carregado.");
+});
+q("pdDestBtn").addEventListener("click",async()=>{
+  const r=await chooseFolder(PD.dest);
+  if(r.cancelled)return;if(r.error){toast(r.error);return;}
+  PD.dest=r.path;q("pdDest").textContent=r.path;q("pdDest").title=r.path;
+});
+q("pdAddBtn").addEventListener("click",()=>{
+  if(PD.data.length>=250){toast("Já são 250 caixas (máximo).");return;}
+  const restam=250-PD.data.length;
+  q("modal").innerHTML=`<h3>Adicionar caixas</h3><p class="hint">Quantas caixas quer adicionar? (máximo agora: ${restam})</p><div class="field"><input type="number" id="pdAddN" min="1" max="${restam}" value="5" style="width:120px"></div><div class="acts"><button onclick="closeModal()">Cancelar</button><button class="btn-primary" id="pdAddGo">Adicionar</button></div>`;
+  openModal();q("pdAddN").focus();
+  q("pdAddGo").addEventListener("click",()=>{const n=parseInt(q("pdAddN").value||"0",10)||0;pdAdd(n);closeModal();});
+});
+q("pdSplit").addEventListener("click",async()=>{
+  pdReadInputs();
+  const sub=q("pdSubChk").checked?((q("pdSubName").value||"Separados").trim()):"";
+  const ranges=PD.data.filter(b=>((b.start+"").trim()||(b.end+"").trim()||(b.name+"").trim()))
+    .map(b=>({start:b.start,end:b.end,name:b.name}));
+  q("pdSplit").disabled=true;q("pdSplit").textContent="Separando…";
+  const r=await api("/api/pdf-split",{pdf:PD.pdf,dest:PD.dest,subfolder:sub,ranges});
+  q("pdSplit").textContent="Separar PDF";pdValidate();
+  if(!r.ok){
+    const msg=(r.problems||[]).map(p=>"Caixa "+p.row+": "+esc(p.reason)).join("<br>")||esc(r.error||"Falha ao separar.");
+    q("modal").innerHTML=`<h3>Há itens a corrigir</h3><div class="pv">${msg}</div><div class="acts"><button onclick="closeModal()">Fechar</button></div>`;openModal();return;
+  }
+  let html=`<div class="box"><b>${r.results.length}</b> arquivo(s) gerado(s) em:<br><i>${esc(r.dest)}</i><div class="field">`+r.results.map(x=>`<div class="line">${esc(x.name)} — páginas ${x.pages} (${x.count} pág.)</div>`).join("")+`</div></div>`;
+  q("pdResult").innerHTML=html;toast("✓ "+r.results.length+" PDF(s) gerado(s).");
+});
+PD.data=[{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""}];
+pdRender();
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
@@ -1320,9 +1578,10 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--pick":
-        initial = sys.argv[2] if len(sys.argv) >= 3 else ""
-        outfile = sys.argv[3] if len(sys.argv) >= 4 else ""
-        path = pick_folder_tk(initial)
+        kind = sys.argv[2] if len(sys.argv) >= 3 else "folder"
+        initial = sys.argv[3] if len(sys.argv) >= 4 else ""
+        outfile = sys.argv[4] if len(sys.argv) >= 5 else ""
+        path = pick_path_tk(kind, initial)
         if outfile:
             try:
                 with open(outfile, "w", encoding="utf-8") as f:
