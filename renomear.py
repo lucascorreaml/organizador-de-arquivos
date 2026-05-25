@@ -361,7 +361,7 @@ def _unique_name(folder, fname):
     return cand
 
 
-def pdf_split(pdf_path, dest_folder, ranges):
+def pdf_split(pdf_path, dest_folder, ranges, auto_suffix=False):
     if not pdf_path or not os.path.isfile(pdf_path):
         raise ValueError("PDF nao encontrado.")
     from pypdf import PdfReader, PdfWriter
@@ -381,15 +381,28 @@ def pdf_split(pdf_path, dest_folder, ranges):
             s, e = int(s_raw), int(e_raw)
         except ValueError:
             problems.append({"row": idx + 1, "reason": "Paginas precisam ser numeros."}); continue
+        if auto_suffix:
+            s = max(1, s); e = min(total, e)
+        if s < 1 or e > total or s > e:
+            problems.append({"row": idx + 1, "reason": f"Faixa invalida (o PDF tem {total} paginas)."}); continue
         fname = name if name.lower().endswith(".pdf") else name + ".pdf"
         ok, reason = validate_name(fname)
         if not ok:
-            problems.append({"row": idx + 1, "reason": reason}); continue
-        if s < 1 or e > total or s > e:
-            problems.append({"row": idx + 1, "reason": f"Faixa invalida (o PDF tem {total} paginas)."}); continue
+            if auto_suffix:
+                fname = (suggest_name(os.path.splitext(fname)[0]) or f"arquivo {idx+1}") + ".pdf"
+            else:
+                problems.append({"row": idx + 1, "reason": reason}); continue
         key = fname.lower()
         if key in seen:
-            problems.append({"row": idx + 1, "reason": f'Nome repetido: "{fname}".'}); continue
+            if auto_suffix:
+                base, ext = os.path.splitext(fname)
+                k = 2
+                while f"{base} ({k}){ext}".lower() in seen:
+                    k += 1
+                fname = f"{base} ({k}){ext}"
+                key = fname.lower()
+            else:
+                problems.append({"row": idx + 1, "reason": f'Nome repetido: "{fname}".'}); continue
         seen.add(key)
         plan.append((s, e, fname))
 
@@ -411,6 +424,76 @@ def pdf_split(pdf_path, dest_folder, ranges):
     return {"ok": True, "results": results, "dest": dest_folder, "total": total}
 
 
+def pdf_outline(path):
+    """Le os marcadores (bookmarks) do PDF como uma lista plana com nivel e pagina."""
+    if not path or not os.path.isfile(path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader
+    reader = PdfReader(path, strict=False)
+    flat = []
+
+    def walk(items, depth):
+        for it in items:
+            if isinstance(it, list):
+                walk(it, depth + 1)
+            else:
+                try:
+                    page = reader.get_destination_page_number(it) + 1
+                except Exception:
+                    page = None
+                title = getattr(it, "title", None) or "(sem titulo)"
+                if page:
+                    flat.append({"title": str(title), "depth": depth, "page": page})
+
+    try:
+        walk(reader.outline, 1)
+    except Exception:
+        flat = []
+    maxdepth = max((b["depth"] for b in flat), default=0)
+    return {"pages": len(reader.pages), "maxdepth": maxdepth, "bookmarks": flat}
+
+
+def pdf_save_outline(pdf_path, out_path, items):
+    """Grava uma nova estrutura de marcadores no PDF (copia as paginas)."""
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader, PdfWriter
+    with open(pdf_path, "rb") as f:
+        data = f.read()
+    reader = PdfReader(io.BytesIO(data), strict=False)
+    total = len(reader.pages)
+    writer = PdfWriter()
+    try:
+        writer.append(reader, import_outline=False)
+    except TypeError:
+        writer.append(reader)
+
+    parents, count = {}, 0
+    for it in items:
+        title = (it.get("title") or "").strip() or "(sem titulo)"
+        try:
+            page = int(it.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, min(total, page)) - 1
+        try:
+            depth = max(1, int(it.get("depth", 1)))
+        except (TypeError, ValueError):
+            depth = 1
+        parent = parents.get(depth - 1) if depth > 1 else None
+        ref = writer.add_outline_item(title, page, parent=parent)
+        parents[depth] = ref
+        for d in [k for k in parents if k > depth]:
+            del parents[d]
+        count += 1
+
+    tmp = out_path + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out_path)
+    return {"ok": True, "path": out_path, "count": count}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
@@ -430,11 +513,14 @@ def pick_path_tk(kind="folder", initialdir=None):
     root.wm_attributes("-topmost", 1)
     root.update()
     ini = initialdir if (initialdir and os.path.isdir(initialdir)) else None
-    if kind == "file":
-        path = filedialog.askopenfilename(
-            title="Escolha o arquivo PDF", parent=root,
-            filetypes=[("PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
-            initialdir=ini)
+    if kind in ("file", "anyfile"):
+        if kind == "anyfile":
+            ft = [("Todos os arquivos", "*.*"), ("PDF", "*.pdf")]
+            ttl = "Escolha o arquivo"
+        else:
+            ft = [("PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+            ttl = "Escolha o arquivo PDF"
+        path = filedialog.askopenfilename(title=ttl, parent=root, filetypes=ft, initialdir=ini)
     else:
         kw = {"title": "Escolha a pasta", "mustexist": True, "parent": root}
         if ini:
@@ -603,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"ok": True, "content": content, "filename": filename})
 
             elif self.path == "/api/choose-file":
-                path = choose_path_dialog("file", data.get("start"))
+                path = choose_path_dialog(data.get("kind", "file"), data.get("start"))
                 if not path:
                     self._send(200, {"cancelled": True})
                     return
@@ -612,6 +698,23 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/pdf-info":
                 try:
                     self._send(200, {"ok": True, **pdf_info(data.get("path", ""))})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-outline":
+                try:
+                    self._send(200, {"ok": True, **pdf_outline(data.get("path", ""))})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-save-outline":
+                pdf = data.get("pdf", "")
+                out = pdf if data.get("overwrite") else data.get("out", "")
+                if not out:
+                    self._send(200, {"ok": False, "error": "Caminho de saida nao informado."})
+                    return
+                try:
+                    self._send(200, pdf_save_outline(pdf, out, data.get("items", [])))
                 except Exception as e:
                     self._send(200, {"ok": False, "error": str(e)})
 
@@ -625,7 +728,8 @@ class Handler(BaseHTTPRequestHandler):
                         self._send(200, {"ok": False, "problems": [{"row": 0, "reason": f"Subpasta invalida: {reason}"}]})
                         return
                     dest = os.path.join(dest, sub)
-                self._send(200, pdf_split(pdf, dest, data.get("ranges", [])))
+                self._send(200, pdf_split(pdf, dest, data.get("ranges", []),
+                                          auto_suffix=bool(data.get("auto"))))
 
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
@@ -844,6 +948,30 @@ HTML_PAGE = r"""<!DOCTYPE html>
   @media(max-width:760px){.cols{display:block}.xltext{min-height:240px}}
   .pgin{width:108px}
 
+  /* previa da divisao automatica */
+  .planwrap{max-height:480px;overflow:auto;margin-top:6px;border-top:1px solid #ddd}
+  .planrow{padding:7px 2px;border-bottom:1px solid #eee}
+  .planpg{font-style:italic;font-size:13px;color:#777;margin-top:2px}
+  .planseq{color:#555;font-weight:bold}
+  .planinc{font-size:12.5px;color:#666;margin-top:2px}
+  .pdfext{color:#888}
+  input.bmname{width:55%;min-width:240px;font-size:15px;border:1px solid #bbb;padding:3px 6px}
+
+  /* aba Comparar Arquivos */
+  .cmplayout{display:flex;gap:20px;align-items:flex-start}
+  .cmplayout .cmpcol{flex:1;min-width:0}
+  .cmpview{min-height:80vh;max-height:90vh}
+  .cmpview iframe{height:82vh;min-height:600px}
+  @media(max-width:900px){.cmplayout{display:block}}
+
+  /* aba Marcadores */
+  .mkrow{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #eee}
+  .mkdepth{color:#aaa;font-size:12px;width:30px;text-align:right;flex:none}
+  input.mktitle{flex:1;min-width:120px;font-size:15px;border:1px solid #bbb;padding:3px 6px}
+  input.mkpage{width:66px;flex:none}
+  .mkbtns{flex:none;white-space:nowrap}
+  .mkbtns button{padding:2px 7px;font-size:14px;margin-left:2px}
+
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #000;padding:9px 16px;font-size:14.5px;display:none;z-index:50}
   .toast.show{display:block}
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
@@ -869,7 +997,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="create">Criar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="organize">Organizar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="export">Exportar lista</button> <span class="tabsep">|</span>
-    <button class="tab" data-tab="pdf">Dividir PDF</button>
+    <button class="tab" data-tab="pdf">Extrair Páginas</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="divide">Dividir PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="marks">Marcadores</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="compare">Comparar Arquivos</button>
   </p>
   <hr>
 
@@ -1090,6 +1221,101 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="pdside">
         <p style="margin:0 0 4px"><b>Pré-visualização do PDF</b></p>
         <div class="preview-box" id="pdPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== DIVIDIR PDF (automatico) ===== -->
+  <section class="panel" id="panel-divide">
+    <div class="pdlayout">
+      <div class="pdmain">
+        <div class="toolbar">
+          <button class="btn-primary" id="dvPick">Escolher PDF</button>
+          <span class="pathbox" id="dvPath">Nenhum PDF selecionado</span>
+        </div>
+        <div class="box">
+          <div class="opts">
+            <button id="dvDestBtn">Escolher pasta de destino</button>
+            <span class="pathbox" id="dvDest">(padrão: a mesma pasta do PDF)</span>
+          </div>
+          <div class="opts" style="margin-top:10px">
+            <label class="opt"><input type="checkbox" id="dvSubChk" checked> Salvar numa subpasta:</label>
+            <input type="text" id="dvSubName" value="Dividido" style="width:220px">
+          </div>
+        </div>
+        <div class="box">
+          <span class="lbl">Como dividir</span>
+          <div class="opts"><label class="opt"><input type="radio" name="dvMode" value="every" checked> A cada <input type="number" id="dvEvery" value="50" min="1" style="width:80px"> páginas</label></div>
+          <div class="opts" style="margin-top:8px"><label class="opt"><input type="radio" name="dvMode" value="parts"> Em <input type="number" id="dvParts" value="4" min="1" style="width:70px"> partes iguais</label></div>
+          <div class="opts" style="margin-top:8px"><label class="opt"><input type="radio" name="dvMode" value="burst"> Uma página por arquivo</label></div>
+          <div class="opts" style="margin-top:8px">
+            <label class="opt"><input type="radio" name="dvMode" value="bookmarks"> Por capítulos (marcadores)</label>
+            <span class="hint" id="dvBmInfo"></span>
+          </div>
+          <div id="dvBmOpts" style="display:none;margin-top:10px;padding-left:22px">
+            <div class="opts">
+              <label class="opt">Nível: <select id="dvLevel"></select></label>
+              <label class="opt"><input type="checkbox" id="dvNum"> Numerar (01, 02, …)</label>
+              <label class="opt"><input type="checkbox" id="dvFront"> Incluir páginas antes do 1º marcador</label>
+            </div>
+          </div>
+        </div>
+        <div class="field" id="dvBaseField">
+          <span class="lbl">Nome base dos arquivos</span>
+          <input type="text" id="dvBase" placeholder="(usa o nome do PDF)">
+        </div>
+        <div class="actionbar">
+          <span class="count" id="dvCount">Escolha um PDF para começar.</span>
+          <button id="dvSplit" disabled class="btn-primary">Dividir PDF</button>
+        </div>
+        <div style="margin-top:10px"><b>Prévia da divisão</b></div>
+        <div id="dvPreview"></div>
+        <div id="dvResult"></div>
+      </div>
+      <div class="pdside">
+        <p style="margin:0 0 4px"><b>Pré-visualização do PDF</b></p>
+        <div class="preview-box" id="dvPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== MARCADORES ===== -->
+  <section class="panel" id="panel-marks">
+    <div class="pdlayout">
+      <div class="pdmain">
+        <div class="toolbar">
+          <button class="btn-primary" id="mkPick">Escolher PDF</button>
+          <span class="pathbox" id="mkPath">Nenhum PDF selecionado</span>
+        </div>
+        <div class="toolbar">
+          <button id="mkAdd" disabled>+ Adicionar marcador</button>
+          <button id="mkPaste" disabled>Colar lista</button>
+          <button id="mkDivide" disabled>Dividir por estes</button>
+          <button class="btn-primary" id="mkSave" disabled>Salvar marcadores</button>
+        </div>
+        <p class="hint">Edite título, página e nível. Use <b>⇥</b>/<b>⇤</b> para mudar o nível e <b>↑</b>/<b>↓</b> para reordenar.</p>
+        <div id="mkList"></div>
+      </div>
+      <div class="pdside">
+        <p style="margin:0 0 4px"><b>Pré-visualização do PDF</b></p>
+        <div class="preview-box" id="mkPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== COMPARAR ARQUIVOS ===== -->
+  <section class="panel" id="panel-compare">
+    <p class="hint">Abra um arquivo de cada lado para comparar (PDF, imagem ou texto). Cada lado rola de forma independente.</p>
+    <div class="cmplayout">
+      <div class="cmpcol">
+        <div class="toolbar"><button class="btn-primary" id="cpPickA">Escolher arquivo (esquerda)</button></div>
+        <div class="pathbox" id="cpPathA" style="display:block;max-width:none">Nenhum arquivo</div>
+        <div class="preview-box cmpview" id="cpA"><i>Lado esquerdo</i></div>
+      </div>
+      <div class="cmpcol">
+        <div class="toolbar"><button class="btn-primary" id="cpPickB">Escolher arquivo (direita)</button></div>
+        <div class="pathbox" id="cpPathB" style="display:block;max-width:none">Nenhum arquivo</div>
+        <div class="preview-box cmpview" id="cpB"><i>Lado direito</i></div>
       </div>
     </div>
   </section>
@@ -1535,6 +1761,282 @@ q("pdSplit").addEventListener("click",async()=>{
 });
 PD.data=[{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""},{start:"",end:"",name:""}];
 pdRender();
+
+// ===================================================================
+//  DIVIDIR PDF (automatico)
+// ===================================================================
+const DV={pdf:null,pages:0,dest:null,outline:[],maxdepth:0,name:"",_plan:[]};
+function dvMode(){return (document.querySelector('input[name=dvMode]:checked')||{}).value||"every";}
+function pad(n,w){return String(n).padStart(w,"0");}
+function sanTitle(t){t=(t||"").replace(/[<>:"/\\|?*\x00-\x1f]/g,"_").replace(/\s+/g," ").trim().replace(/[ .]+$/,"");return t||"(sem titulo)";}
+function dvComputePlan(){
+  if(!DV.pdf||!DV.pages)return [];
+  const total=DV.pages,mode=dvMode(),base=(q("dvBase").value||DV.name||"arquivo").trim(),W=String(total).length;
+  let plan=[];
+  if(mode==="every"){
+    let X=Math.max(1,parseInt(q("dvEvery").value||"1",10));
+    for(let s=1;s<=total;s+=X){const e=Math.min(s+X-1,total);plan.push({name:base+" - "+pad(s,W)+"-"+pad(e,W),start:s,end:e});}
+  }else if(mode==="parts"){
+    let P=Math.max(1,Math.min(parseInt(q("dvParts").value||"1",10),total)),bse=Math.floor(total/P),rem=total%P,s=1,PW=String(P).length;
+    for(let i=0;i<P;i++){const size=bse+(i<rem?1:0);if(size<=0)break;const e=s+size-1;plan.push({name:base+" - parte "+pad(i+1,PW),start:s,end:e});s=e+1;}
+  }else if(mode==="burst"){
+    for(let i=1;i<=total;i++)plan.push({name:base+" - pag "+pad(i,W),start:i,end:i});
+  }else if(mode==="bookmarks"){
+    const L=parseInt(q("dvLevel").value||"1",10),bnd=DV.outline.filter(b=>b.depth<=L);
+    if(q("dvFront").checked && bnd.length && bnd[0].page>1)
+      plan.push({name:"(inicio)",start:1,end:bnd[0].page-1,includes:[]});
+    for(let i=0;i<bnd.length;i++){
+      const s=bnd[i].page,e=(i+1<bnd.length)?bnd[i+1].page-1:total,ee=(e<s?s:e);
+      const inc=DV.outline.filter(b=>b.depth>L && b.page>=s && b.page<=ee).map(b=>({t:b.title,p:b.page}));
+      plan.push({name:sanTitle(bnd[i].title),start:s,end:ee,includes:inc});
+    }
+  }
+  const seen={};
+  plan.forEach(r=>{let nm=r.name,k=nm.toLowerCase(),n=2;while(seen[k]){nm=r.name+" ("+n+")";k=nm.toLowerCase();n++;}r.name=nm;seen[k]=1;});
+  return plan;
+}
+function dvRenderPreview(){
+  const wrap=q("dvPreview");
+  if(!DV.pdf){wrap.innerHTML="";q("dvCount").textContent="Escolha um PDF para começar.";q("dvSplit").disabled=true;return;}
+  const plan=dvComputePlan();DV._plan=plan;
+  if(!plan.length){wrap.innerHTML='<div class="hint">Nada para dividir.</div>';q("dvCount").textContent="0 arquivos";q("dvSplit").disabled=true;return;}
+  const bm=dvMode()==="bookmarks",num=bm&&q("dvNum").checked,NW=Math.max(2,String(plan.length).length);
+  let html='<div class="planwrap">';
+  plan.forEach((r,i)=>{
+    const prefix=num?('<span class="planseq">'+pad(i+1,NW)+'. </span>'):'';
+    if(bm){
+      html+='<div class="planrow">'+prefix+'<input class="bmname" data-i="'+i+'" value="'+escA(r.name)+'" spellcheck="false"><span class="pdfext">.pdf</span>'
+          +'<div class="planpg">páginas '+r.start+'–'+r.end+' · '+(r.end-r.start+1)+' pág.</div>';
+      if(r.includes&&r.includes.length){
+        const mx=6,shown=r.includes.slice(0,mx).map(x=>esc(x.t)+' (p.'+x.p+')').join(' · ');
+        const extra=r.includes.length>mx?(' · +'+(r.includes.length-mx)+' mais'):'';
+        html+='<div class="planinc">inclui: '+shown+extra+'</div>';
+      }
+      html+='</div>';
+    }else{
+      html+='<div class="planrow"><b>'+esc(r.name)+'.pdf</b><div class="planpg">páginas '+r.start+'–'+r.end+' · '+(r.end-r.start+1)+' pág.</div></div>';
+    }
+  });
+  html+='</div>';wrap.innerHTML=html;
+  const pgTotal=plan.reduce((a,r)=>a+(r.end-r.start+1),0);
+  q("dvCount").innerHTML='<b>'+plan.length+'</b> arquivo(s) · '+pgTotal+' páginas no total'+(plan.length>200?' — atenção: muitos arquivos':'');
+  q("dvSplit").disabled=false;
+}
+function dvFinalRanges(){
+  const plan=DV._plan||[];
+  if(dvMode()!=="bookmarks")return plan.map(r=>({start:r.start,end:r.end,name:r.name}));
+  const num=q("dvNum").checked,NW=Math.max(2,String(plan.length).length);
+  return plan.map((r,i)=>{
+    let nm=r.name;const inp=document.querySelector('.bmname[data-i="'+i+'"]');
+    if(inp&&inp.value.trim())nm=inp.value.trim();
+    if(num)nm=pad(i+1,NW)+" - "+nm;
+    return {start:r.start,end:r.end,name:nm};
+  });
+}
+function dvBuildLevels(){
+  const sel=q("dvLevel");sel.innerHTML="";
+  const bmRadio=document.querySelector('input[name=dvMode][value=bookmarks]');
+  if(!DV.outline.length){
+    q("dvBmInfo").textContent="(este PDF não tem marcadores)";bmRadio.disabled=true;
+    if(bmRadio.checked)document.querySelector('input[name=dvMode][value=every]').checked=true;
+    dvBmVis();return;
+  }
+  bmRadio.disabled=false;q("dvBmInfo").textContent=DV.maxdepth+" nível(is) de marcadores";
+  for(let L=1;L<=DV.maxdepth;L++){const c=DV.outline.filter(b=>b.depth<=L).length;const o=document.createElement("option");o.value=L;o.textContent="nível "+L+" ("+c+" arquivos)";sel.appendChild(o);}
+  dvBmVis();
+}
+function dvBmVis(){
+  const bm=dvMode()==="bookmarks";
+  q("dvBmOpts").style.display=(bm&&DV.outline.length)?"block":"none";
+  q("dvBaseField").style.display=bm?"none":"block";
+}
+q("dvPick").addEventListener("click",async()=>{
+  q("dvPick").disabled=true;
+  const r=await api("/api/choose-file",{start:DV.dest});
+  q("dvPick").disabled=false;
+  if(r.cancelled)return;if(r.error){toast(r.error);return;}
+  const info=await api("/api/pdf-info",{path:r.path});
+  if(!info.ok){toast(info.error||"Não consegui ler este PDF.");return;}
+  DV.pdf=r.path;DV.pages=info.pages;DV.dest=info.folder;DV.name=info.name.replace(/\.pdf$/i,"");
+  q("dvPath").textContent=info.name+"  ("+info.pages+" páginas)";q("dvPath").title=r.path;
+  q("dvDest").textContent=info.folder;q("dvDest").title=info.folder;
+  q("dvBase").value=DV.name;
+  q("dvPrev").innerHTML='<iframe src="/file?path='+encodeURIComponent(r.path)+'"></iframe>';
+  const ol=await api("/api/pdf-outline",{path:r.path});
+  DV.outline=(ol.ok&&ol.bookmarks)?ol.bookmarks:[];DV.maxdepth=(ol.ok&&ol.maxdepth)?ol.maxdepth:0;
+  dvBuildLevels();dvRenderPreview();
+  toast("PDF com "+info.pages+" páginas carregado.");
+});
+q("dvDestBtn").addEventListener("click",async()=>{const r=await chooseFolder(DV.dest);if(r.cancelled)return;if(r.error){toast(r.error);return;}DV.dest=r.path;q("dvDest").textContent=r.path;q("dvDest").title=r.path;});
+document.querySelectorAll('input[name=dvMode]').forEach(r=>r.addEventListener("change",()=>{dvBmVis();dvRenderPreview();}));
+["dvEvery","dvParts","dvBase"].forEach(id=>q(id).addEventListener("input",dvRenderPreview));
+["dvLevel","dvNum","dvFront"].forEach(id=>q(id).addEventListener("change",dvRenderPreview));
+q("dvSplit").addEventListener("click",()=>{
+  const ranges=dvFinalRanges();if(!ranges.length)return;
+  const go=async()=>{
+    closeModal();
+    const sub=q("dvSubChk").checked?((q("dvSubName").value||"Dividido").trim()):"";
+    q("dvSplit").disabled=true;q("dvSplit").textContent="Dividindo…";
+    const r=await api("/api/pdf-split",{pdf:DV.pdf,dest:DV.dest,subfolder:sub,auto:true,ranges});
+    q("dvSplit").textContent="Dividir PDF";dvRenderPreview();
+    if(!r.ok){const msg=(r.problems||[]).map(p=>esc(p.reason)).join("<br>")||esc(r.error||"Falha.");q("modal").innerHTML='<h3>Não foi possível dividir</h3><div class="pv">'+msg+'</div><div class="acts"><button onclick="closeModal()">Fechar</button></div>';openModal();return;}
+    q("dvResult").innerHTML='<div class="box"><b>'+r.results.length+'</b> arquivo(s) gerado(s) em:<br><i>'+esc(r.dest)+'</i></div>';
+    toast("✓ "+r.results.length+" PDF(s) gerado(s).");
+  };
+  if(ranges.length>100)confirmModal("Gerar "+ranges.length+" arquivos?","Isso vai criar "+ranges.length+" PDFs na pasta de destino. Deseja continuar?","Sim, dividir",go);
+  else go();
+});
+
+// ===================================================================
+//  COMPARAR ARQUIVOS
+// ===================================================================
+function cpRender(side,path){
+  const box=q(side==="A"?"cpA":"cpB"),url="/file?path="+encodeURIComponent(path),e=extOf(path.split(/[\\/]/).pop());
+  if(IMG.has(e))box.innerHTML='<img src="'+url+'" alt="">';
+  else if(e==="pdf")box.innerHTML='<iframe src="'+url+'"></iframe>';
+  else if(TXT.has(e)){box.innerHTML="<i>carregando…</i>";fetch(url).then(r=>r.text()).then(t=>{const pre=document.createElement("pre");pre.textContent=t.length>50000?t.slice(0,50000)+"\n…(cortado)":t;box.innerHTML="";box.appendChild(pre);}).catch(()=>box.innerHTML="<i>não foi possível ler.</i>");}
+  else box.innerHTML="<i>Sem pré-visualização para este tipo de arquivo.</i>";
+}
+async function cpPick(side){
+  const r=await api("/api/choose-file",{kind:"anyfile"});
+  if(r.cancelled)return;if(r.error){toast(r.error);return;}
+  const nm=r.path.split(/[\\/]/).pop();
+  const lbl=q(side==="A"?"cpPathA":"cpPathB");lbl.textContent=nm;lbl.title=r.path;
+  cpRender(side,r.path);
+}
+q("cpPickA").addEventListener("click",()=>cpPick("A"));
+q("cpPickB").addEventListener("click",()=>cpPick("B"));
+
+// ===================================================================
+//  MARCADORES (editor completo)
+// ===================================================================
+const MK={pdf:null,pages:0,folder:null,name:"",items:[]};
+function mkReadInputs(){
+  MK.items.forEach((it,i)=>{
+    const t=q("mk-t-"+i),p=q("mk-p-"+i);
+    if(t)it.title=t.value;
+    if(p){const v=parseInt(p.value,10);if(!isNaN(v))it.page=v;}
+  });
+}
+function mkUpd(){
+  const has=!!MK.pdf;
+  q("mkAdd").disabled=!has;q("mkPaste").disabled=!has;q("mkSave").disabled=!has;
+  q("mkDivide").disabled=!has||!MK.items.length;
+}
+function mkRender(){
+  const area=q("mkList");
+  if(!MK.pdf){area.innerHTML='<div class="empty">Escolha um PDF para ver e editar os marcadores.</div>';mkUpd();return;}
+  if(!MK.items.length){area.innerHTML='<div class="empty">Este PDF não tem marcadores. Use "Adicionar marcador" ou "Colar lista".</div>';mkUpd();return;}
+  let html="";
+  MK.items.forEach((it,i)=>{
+    const ml=(Math.max(1,it.depth)-1)*22;
+    html+='<div class="mkrow" style="margin-left:'+ml+'px">'
+      +'<span class="mkdepth">N'+it.depth+'</span>'
+      +'<input class="mktitle" id="mk-t-'+i+'" value="'+escA(it.title)+'" spellcheck="false">'
+      +'<span>p.</span><input type="number" min="1" max="'+MK.pages+'" class="mkpage" id="mk-p-'+i+'" value="'+escA(it.page)+'">'
+      +'<span class="mkbtns">'
+      +'<button data-a="out" data-i="'+i+'" title="Recuar nível">⇤</button>'
+      +'<button data-a="in" data-i="'+i+'" title="Aumentar nível">⇥</button>'
+      +'<button data-a="up" data-i="'+i+'" title="Subir">↑</button>'
+      +'<button data-a="down" data-i="'+i+'" title="Descer">↓</button>'
+      +'<button data-a="del" data-i="'+i+'" title="Excluir">✕</button>'
+      +'</span></div>';
+  });
+  area.innerHTML=html;
+  area.querySelectorAll(".mktitle,.mkpage").forEach(inp=>inp.addEventListener("input",mkReadInputs));
+  area.querySelectorAll(".mkbtns button").forEach(b=>b.addEventListener("click",()=>mkAction(b.dataset.a,+b.dataset.i)));
+  mkUpd();
+}
+function mkAction(a,i){
+  mkReadInputs();
+  const it=MK.items[i];
+  if(a==="del")MK.items.splice(i,1);
+  else if(a==="in")it.depth=Math.min(it.depth+1,6);
+  else if(a==="out")it.depth=Math.max(1,it.depth-1);
+  else if(a==="up"&&i>0)MK.items.splice(i-1,0,MK.items.splice(i,1)[0]);
+  else if(a==="down"&&i<MK.items.length-1)MK.items.splice(i+1,0,MK.items.splice(i,1)[0]);
+  mkRender();
+}
+async function mkLoadFrom(path){
+  const info=await api("/api/pdf-info",{path});
+  if(!info.ok){toast(info.error||"Não consegui ler este PDF.");return false;}
+  MK.pdf=path;MK.pages=info.pages;MK.folder=info.folder;MK.name=info.name.replace(/\.pdf$/i,"");
+  q("mkPath").textContent=info.name+"  ("+info.pages+" páginas)";q("mkPath").title=path;
+  q("mkPrev").innerHTML='<iframe src="/file?path='+encodeURIComponent(path)+'&t='+Date.now()+'"></iframe>';
+  const ol=await api("/api/pdf-outline",{path});
+  MK.items=(ol.ok&&ol.bookmarks)?ol.bookmarks.map(b=>({title:b.title,depth:b.depth,page:b.page})):[];
+  mkRender();return true;
+}
+q("mkPick").addEventListener("click",async()=>{
+  q("mkPick").disabled=true;
+  const r=await api("/api/choose-file",{start:MK.folder});
+  q("mkPick").disabled=false;
+  if(r.cancelled)return;if(r.error){toast(r.error);return;}
+  if(await mkLoadFrom(r.path))toast(MK.items.length+" marcador(es) carregado(s).");
+});
+q("mkAdd").addEventListener("click",()=>{mkReadInputs();MK.items.push({title:"Novo marcador",depth:1,page:1});mkRender();});
+q("mkPaste").addEventListener("click",()=>{
+  q("modal").innerHTML='<h3>Colar lista de marcadores</h3><p class="hint">Um por linha. Indente com espaços/tabs para criar níveis. Informe a página com "| 12" no fim. Ex.: <i>Capítulo 1 | 1</i></p><div class="field"><textarea id="mkPasteArea" placeholder="Capítulo 1 | 1&#10;  Seção 1.1 | 3&#10;  Seção 1.2 | 5&#10;Capítulo 2 | 9"></textarea></div><div class="acts"><button onclick="closeModal()">Cancelar</button><button class="btn-primary" id="mkPasteGo">Adicionar</button></div>';
+  openModal();q("mkPasteArea").focus();
+  q("mkPasteGo").addEventListener("click",()=>{
+    mkReadInputs();
+    q("mkPasteArea").value.split(/\r?\n/).forEach(raw=>{
+      if(!raw.trim())return;
+      const lead=raw.match(/^[ \t]*/)[0];
+      const tabs=(lead.match(/\t/g)||[]).length,spaces=lead.replace(/\t/g,"").length;
+      let depth=Math.max(1,Math.min(1+tabs+Math.floor(spaces/2),6));
+      let content=raw.trim(),page=1;
+      const m=content.match(/^(.*?)[\|\t]\s*(\d+)\s*$/);
+      if(m){content=m[1].trim();page=parseInt(m[2],10);}
+      page=Math.max(1,Math.min(page,MK.pages||page));
+      MK.items.push({title:content||"(sem titulo)",depth,page});
+    });
+    closeModal();mkRender();toast("Marcadores adicionados.");
+  });
+});
+q("mkSave").addEventListener("click",()=>{
+  mkReadInputs();
+  if(!MK.items.length){toast("Não há marcadores para salvar.");return;}
+  const defName=MK.name+" - marcado.pdf";
+  q("modal").innerHTML='<h3>Salvar marcadores</h3><p class="hint">Como você quer salvar?</p>'
+    +'<div class="field"><label class="opt"><input type="radio" name="mkSaveMode" value="new" checked> Novo arquivo:</label> <input type="text" id="mkSaveName" value="'+escA(defName)+'" style="width:58%"></div>'
+    +'<div class="field"><label class="opt"><input type="radio" name="mkSaveMode" value="over"> Sobrescrever o PDF original</label></div>'
+    +'<div class="acts"><button onclick="closeModal()">Cancelar</button><button class="btn-primary" id="mkSaveGo">Salvar</button></div>';
+  openModal();
+  q("mkSaveGo").addEventListener("click",async()=>{
+    const mode=(document.querySelector('input[name=mkSaveMode]:checked')||{}).value;
+    const body={pdf:MK.pdf,items:MK.items};
+    if(mode==="over")body.overwrite=true;
+    else{let nm=(q("mkSaveName").value||defName).trim();if(!nm.toLowerCase().endsWith(".pdf"))nm+=".pdf";body.out=MK.folder+"\\"+nm;}
+    q("mkSaveGo").disabled=true;q("mkSaveGo").textContent="Salvando…";
+    const r=await api("/api/pdf-save-outline",body);
+    closeModal();
+    if(!r.ok){toast(r.error||"Falha ao salvar.");return;}
+    toast("✓ Salvo: "+r.path.split(/[\\/]/).pop()+" ("+r.count+" marcadores)");
+    await mkLoadFrom(r.path);
+  });
+});
+q("mkDivide").addEventListener("click",()=>{
+  mkReadInputs();
+  if(!MK.items.length){toast("Não há marcadores.");return;}
+  const maxd=Math.max.apply(null,MK.items.map(b=>b.depth));
+  let optsHtml="";
+  for(let L=1;L<=maxd;L++){const c=MK.items.filter(b=>b.depth<=L).length;optsHtml+='<option value="'+L+'">nível '+L+' ('+c+' arquivos)</option>';}
+  q("modal").innerHTML='<h3>Dividir por estes marcadores</h3><p class="hint">Escolha o nível. Os arquivos saem na subpasta "Dividido", nomeados pelos marcadores.</p><div class="field">Nível: <select id="mkDivLevel">'+optsHtml+'</select></div><div class="acts"><button onclick="closeModal()">Cancelar</button><button class="btn-primary" id="mkDivGo">Dividir</button></div>';
+  openModal();
+  q("mkDivGo").addEventListener("click",async()=>{
+    const L=parseInt(q("mkDivLevel").value||"1",10);
+    const bnd=MK.items.filter(b=>b.depth<=L).slice().sort((a,b)=>a.page-b.page);
+    const ranges=[];
+    for(let i=0;i<bnd.length;i++){const s=bnd[i].page,e=(i+1<bnd.length)?bnd[i+1].page-1:MK.pages;ranges.push({start:s,end:(e<s?s:e),name:sanTitle(bnd[i].title)});}
+    q("mkDivGo").disabled=true;q("mkDivGo").textContent="Dividindo…";
+    const r=await api("/api/pdf-split",{pdf:MK.pdf,dest:MK.folder,subfolder:"Dividido",auto:true,ranges});
+    closeModal();
+    if(!r.ok){toast((r.problems&&r.problems[0]&&r.problems[0].reason)||r.error||"Falha ao dividir.");return;}
+    toast("✓ "+r.results.length+" PDF(s) gerado(s) na subpasta 'Dividido'.");
+  });
+});
+mkRender();
 
 // ===================================================================
 //  Desfazer global + Modal

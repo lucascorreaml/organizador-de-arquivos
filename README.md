@@ -18,7 +18,10 @@ O app é organizado em abas:
 | **Criar** | Cria várias **pastas ou arquivos em branco** de uma vez (com numeração automática opcional). |
 | **Organizar** | Move os arquivos soltos para subpastas **automaticamente**, por tipo (Imagens, Documentos, Planilhas…) ou por data (ano-mês). |
 | **Exportar lista** | Gera um inventário da pasta em **TXT** ou **CSV**. |
-| **Dividir PDF** | Abre um PDF (com pré-visualização) e o **separa em vários arquivos** por faixas de páginas (página inicial/final + nome), com até 250 cortes de uma vez. |
+| **Extrair Páginas** | Abre um PDF (com pré-visualização) e **extrai faixas de páginas** em vários arquivos (página inicial/final + nome), com até 250 cortes de uma vez. |
+| **Dividir PDF** | Divisão **automática** de um PDF: a cada X páginas, em N partes iguais, uma página por arquivo, ou **por capítulos (marcadores)** com escolha de nível e prévia detalhada. |
+| **Marcadores** | Editor completo de marcadores (bookmarks): ver, **renomear, mudar página/nível, reordenar, adicionar/excluir**, criar em massa colando uma lista, salvar no PDF e dividir por eles. |
+| **Comparar Arquivos** | Abre **dois visualizadores lado a lado** (PDF, imagem ou texto) para comparar arquivos. |
 
 Extras: botão **Desfazer** (para renomear, criar e organizar) e **prévia/confirmação** antes de aplicar qualquer mudança.
 
