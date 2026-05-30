@@ -2186,15 +2186,16 @@ async function uploadFile(file){
   const r=await fetch("/api/upload?name="+encodeURIComponent(file.name),{method:"POST",body:file});
   return r.json();
 }
-function makeDrop(el,onPdf){
+function makeDrop(el,onFile,accept){
   if(!el) return;
+  const re=accept||/\.pdf$/i;
   el.addEventListener("dragover",e=>{e.preventDefault();el.classList.add("dragover");});
   el.addEventListener("dragleave",()=>el.classList.remove("dragover"));
   el.addEventListener("drop",async e=>{
     e.preventDefault();el.classList.remove("dragover");
-    const files=[...(e.dataTransfer.files||[])].filter(f=>/\.pdf$/i.test(f.name));
-    if(!files.length){toast("Solte um arquivo PDF.");return;}
-    for(const f of files){const r=await uploadFile(f);if(r.ok)onPdf(r.path,r.name,true);else toast(r.error||"Falha no upload.");}
+    const files=[...(e.dataTransfer.files||[])].filter(f=>re.test(f.name));
+    if(!files.length){toast("Solte um arquivo válido aqui.");return;}
+    for(const f of files){const r=await uploadFile(f);if(r.ok)onFile(r.path,r.name,true);else toast(r.error||"Falha no upload.");}
   });
 }
 function downloadLink(serverPath,label){
