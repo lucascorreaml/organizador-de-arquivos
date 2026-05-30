@@ -286,3 +286,30 @@ def test_save_upload_aceita_imagem(tmp_path, monkeypatch):
     monkeypatch.setattr(renomear, "_UPLOAD_DIR", str(tmp_path))
     full = renomear.save_upload("foto.PNG", b"\x89PNG")
     assert full.lower().endswith(".png")
+
+
+def test_pdf_rearrange_src_duplicado(pdf_factory, tmp_path):
+    src = pdf_factory("s.pdf", 2)
+    out = str(tmp_path / "o.pdf")
+    ops = [{"src": 0, "rotate": 90}, {"src": 0, "rotate": 90}]
+    renomear.pdf_rearrange(src, ops, out)
+    from pypdf import PdfReader
+    r = PdfReader(out)
+    rots = [int(p.get("/Rotate") or 0) for p in r.pages]
+    assert rots == [90, 90]  # cada op independente (sem aliasing)
+
+def test_pdf_to_images_jpg(pdf_factory, tmp_path):
+    import pytest
+    if not renomear.resolve_ghostscript():
+        pytest.skip("Ghostscript nao encontrado.")
+    src = pdf_factory("s.pdf", 2)
+    res = renomear.pdf_to_images(src, str(tmp_path / "j"), "jpg", 96)
+    assert res["count"] == 2 and all(f.lower().endswith(".jpg") for f in res["files"])
+
+def test_pdf_set_password_ja_protegido(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 1)
+    prot = str(tmp_path / "p.pdf")
+    renomear.pdf_set_password(src, prot, "abc")
+    with pytest.raises(ValueError):
+        renomear.pdf_set_password(prot, str(tmp_path / "o.pdf"), "xyz")

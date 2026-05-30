@@ -800,9 +800,10 @@ def pdf_rearrange(pdf_path, ops, out):
             rot = 0
         if rot % 90 != 0:
             raise ValueError("Rotacao deve ser multiplo de 90.")
-        page = reader.pages[src]
+        import copy
+        page = copy.copy(reader.pages[src])  # isola a mutacao de /Rotate
         if rot:
-            page = page.rotate(rot)
+            page.rotate(rot)
         writer.add_page(page)
     tmp = out + ".tmp"
     with open(tmp, "wb") as f:
@@ -821,7 +822,8 @@ def images_to_pdf(image_paths, out, page_mode="fit"):
     for p in image_paths:
         if not p or not os.path.isfile(p):
             raise ValueError(f"Imagem nao encontrada: {p}")
-        img = Image.open(p).convert("RGB")
+        with Image.open(p) as raw:
+            img = raw.convert("RGB")
         if page_mode == "a4":
             a4 = (595, 842)
             canvas = Image.new("RGB", a4, "white")
@@ -833,7 +835,14 @@ def images_to_pdf(image_paths, out, page_mode="fit"):
         else:
             pages.append(img)
     tmp = out + ".tmp"
-    pages[0].save(tmp, "PDF", resolution=72.0, save_all=True, append_images=pages[1:])
+    try:
+        pages[0].save(tmp, "PDF", resolution=72.0, save_all=True, append_images=pages[1:])
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, out)
     return {"ok": True, "path": out, "pages": len(pages)}
 
@@ -866,6 +875,11 @@ def pdf_to_images(pdf_path, dest_folder, fmt="png", dpi=150):
     files = sorted(f for f in os.listdir(dest_folder)
                    if f.lower().startswith("pagina-") and f.lower().endswith("." + ext))
     if proc.returncode != 0 or not files:
+        for f in files:
+            try:
+                os.remove(os.path.join(dest_folder, f))
+            except OSError:
+                pass
         detail = proc.stderr.decode("utf-8", "ignore")[:200] if proc.stderr else ""
         raise ValueError("Falha ao gerar imagens (Ghostscript). " + detail)
     return {"ok": True, "dest": dest_folder, "count": len(files), "files": files}
