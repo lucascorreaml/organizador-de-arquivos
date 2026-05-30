@@ -1,11 +1,17 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Empacotamento (PyInstaller)
 build/
 dist/
-*.spec
+
+# Ghostscript binaries (copiados localmente para empacotar no .exe)
+gs/
+
+# Arquivo de check JS temporario
+_jscheck.js
 
 # Temporarios do proprio app
 .renomear_tmp_*
