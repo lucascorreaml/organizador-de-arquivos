@@ -667,6 +667,36 @@ def pdf_compress(src, out, quality="balance"):
     return {"ok": True, "path": out, "before": before, "after": after, "saved_pct": saved}
 
 
+_UPLOAD_DIR = None
+
+
+def upload_dir():
+    global _UPLOAD_DIR
+    if _UPLOAD_DIR is None or not os.path.isdir(_UPLOAD_DIR):
+        _UPLOAD_DIR = tempfile.mkdtemp(prefix="renomear_up_")
+    return _UPLOAD_DIR
+
+
+def save_upload(name, data):
+    """Grava bytes de um PDF arrastado num diretorio temporario; devolve o caminho."""
+    safe = suggest_name(os.path.basename(name or "arquivo.pdf")) or "arquivo.pdf"
+    if not safe.lower().endswith(".pdf"):
+        safe += ".pdf"
+    dest = _unique_name(upload_dir(), safe)
+    full = os.path.join(upload_dir(), dest)
+    with open(full, "wb") as f:
+        f.write(data)
+    return full
+
+
+def _backup_for_undo(path):
+    """Copia `path` para um temporario e devolve o caminho do backup."""
+    fd, tmp = tempfile.mkstemp(suffix=".pdf", prefix="renomear_bak_")
+    os.close(fd)
+    shutil.copy2(path, tmp)
+    return tmp
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------

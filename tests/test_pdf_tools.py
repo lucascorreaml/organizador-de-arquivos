@@ -125,3 +125,15 @@ def test_pdf_compress_sem_gs_levanta(monkeypatch, pdf_factory, tmp_path):
     src = pdf_factory("src.pdf", 1)
     with pytest.raises(ValueError):
         renomear.pdf_compress(src, str(tmp_path / "o.pdf"), "balance")
+
+
+def test_save_upload_grava_pdf(tmp_path, monkeypatch):
+    full = renomear.save_upload("Documento.pdf", b"%PDF-1.4 fake")
+    assert os.path.isfile(full)
+    assert full.lower().endswith(".pdf")
+    with open(full, "rb") as f:
+        assert f.read() == b"%PDF-1.4 fake"
+
+def test_save_upload_acrescenta_extensao():
+    full = renomear.save_upload("semext", b"x")
+    assert full.lower().endswith(".pdf")
