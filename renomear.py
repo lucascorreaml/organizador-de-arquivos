@@ -1612,7 +1612,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="delpages">Excluir Páginas</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="divide">Dividir PDF</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="merge">Juntar PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="pageops">Girar e Reordenar</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="imgpdf">Imagens ⇄ PDF</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="compress">Comprimir PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="password">Senha</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="marks">Marcadores</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="compare">Comparar Arquivos</button>
   </p>
@@ -1876,6 +1879,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <label class="opt"><input type="checkbox" id="dvFront"> Incluir páginas antes do 1º marcador</label>
             </div>
           </div>
+          <div class="opts" style="margin-top:8px">
+            <label class="opt"><input type="radio" name="dvMode" value="size"> Por tamanho — máx. <input type="number" id="dvMaxMb" value="10" min="1" step="1" style="width:80px"> MB por arquivo</label>
+          </div>
         </div>
         <div class="field" id="dvBaseField">
           <span class="lbl">Nome base dos arquivos</span>
@@ -2004,6 +2010,118 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button id="cpGo" disabled class="btn-primary">Comprimir</button>
     </div>
     <div id="cpResult"></div>
+  </section>
+
+  <!-- ===== GIRAR E REORDENAR ===== -->
+  <section class="panel" id="panel-pageops">
+    <div class="toolbar">
+      <button class="btn-primary" id="poPick">Escolher PDF</button>
+      <span class="pathbox" id="poPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="poDrop">Arraste um PDF aqui</div>
+    <p class="hint">Use ↑/↓ para reordenar e ↻ para girar cada página (90°).</p>
+    <div id="poList"></div>
+    <div class="box">
+      <div class="opts">
+        <label class="opt"><input type="radio" name="poMode" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="poMode" value="over" id="poOver"> Sobrescrever o original</label>
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="poCount">Escolha um PDF.</span>
+      <button id="poUndo" disabled>Desfazer</button>
+      <button id="poGo" disabled class="btn-primary">Aplicar</button>
+    </div>
+    <div id="poResult"></div>
+  </section>
+
+  <!-- ===== IMAGENS <-> PDF ===== -->
+  <section class="panel" id="panel-imgpdf">
+    <div class="box">
+      <div class="opts">
+        <label class="opt"><input type="radio" name="ipDir" value="i2p" checked> Imagens → PDF</label>
+        <label class="opt"><input type="radio" name="ipDir" value="p2i"> PDF → Imagens</label>
+      </div>
+    </div>
+
+    <div id="ipI2P">
+      <div class="toolbar">
+        <button class="btn-primary" id="ipAddImg">Adicionar imagem(ns)</button>
+        <button id="ipClear" disabled>Limpar lista</button>
+      </div>
+      <div class="drop" id="ipImgDrop">Arraste imagens aqui (JPG, PNG…)</div>
+      <div id="ipImgList"></div>
+      <div class="box">
+        <div class="field">
+          <span class="lbl">Tamanho da página</span>
+          <div class="opts">
+            <label class="opt"><input type="radio" name="ipPage" value="fit" checked> Ajustar à imagem</label>
+            <label class="opt"><input type="radio" name="ipPage" value="a4"> A4 retrato</label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lbl">Nome do PDF final</span>
+          <input type="text" id="ipOutName" value="Imagens.pdf" style="width:60%">
+        </div>
+      </div>
+      <div class="actionbar">
+        <span class="count" id="ipI2PCount">Adicione ao menos 1 imagem.</span>
+        <button id="ipI2PGo" disabled class="btn-primary">Gerar PDF</button>
+      </div>
+      <div id="ipI2PResult"></div>
+    </div>
+
+    <div id="ipP2I" style="display:none">
+      <div class="toolbar">
+        <button class="btn-primary" id="ipPdfPick">Escolher PDF</button>
+        <span class="pathbox" id="ipPdfPath">Nenhum PDF selecionado</span>
+      </div>
+      <div class="drop" id="ipPdfDrop">Arraste um PDF aqui</div>
+      <div class="box">
+        <div class="opts">
+          <label class="opt">Formato
+            <select id="ipFmt"><option value="png">PNG</option><option value="jpg">JPG</option></select>
+          </label>
+          <label class="opt">Resolução
+            <select id="ipDpi"><option value="96">Tela (96)</option><option value="150" selected>Boa (150)</option><option value="300">Alta (300)</option></select>
+          </label>
+        </div>
+      </div>
+      <div class="actionbar">
+        <span class="count" id="ipP2ICount">Escolha um PDF.</span>
+        <button id="ipP2IGo" disabled class="btn-primary">Gerar imagens</button>
+      </div>
+      <div id="ipP2IResult"></div>
+    </div>
+  </section>
+
+  <!-- ===== SENHA ===== -->
+  <section class="panel" id="panel-password">
+    <div class="toolbar">
+      <button class="btn-primary" id="pwPick">Escolher PDF</button>
+      <span class="pathbox" id="pwPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="pwDrop">Arraste um PDF aqui</div>
+    <div class="box">
+      <div class="opts">
+        <label class="opt"><input type="radio" name="pwMode" value="protect" checked> Proteger (definir senha)</label>
+        <label class="opt"><input type="radio" name="pwMode" value="remove"> Remover senha</label>
+      </div>
+      <div class="field">
+        <span class="lbl" id="pwLbl">Senha</span>
+        <input type="password" id="pwPass" placeholder="senha" style="width:50%">
+      </div>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="pwSave" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="pwSave" value="over" id="pwOver"> Sobrescrever o original</label>
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="pwCount">Escolha um PDF.</span>
+      <button id="pwUndo" disabled>Desfazer</button>
+      <button id="pwGo" disabled class="btn-primary">Aplicar</button>
+    </div>
+    <div id="pwResult"></div>
   </section>
 
   <!-- ===== COMPARAR ARQUIVOS ===== -->
