@@ -28,3 +28,23 @@ def test_parse_page_spec_invalido():
     import pytest
     with pytest.raises(ValueError):
         renomear.parse_page_spec("1,abc", 10)
+
+
+def test_pdf_delete_pages_remove_e_mantem(pdf_factory, tmp_path):
+    src = pdf_factory("src.pdf", 10)
+    out = str(tmp_path / "out.pdf")
+    res = renomear.pdf_delete_pages(src, "2,4-6", out)
+    assert res["ok"] and res["kept"] == 6 and res["removed"] == 4
+    from pypdf import PdfReader
+    assert len(PdfReader(out).pages) == 6
+
+def test_pdf_delete_pages_bloqueia_tudo(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("src.pdf", 3)
+    with pytest.raises(ValueError):
+        renomear.pdf_delete_pages(src, "1-3", str(tmp_path / "o.pdf"))
+
+def test_pdf_delete_pages_pdf_inexistente(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        renomear.pdf_delete_pages(str(tmp_path / "nada.pdf"), "1", str(tmp_path / "o.pdf"))

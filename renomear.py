@@ -533,6 +533,32 @@ def parse_page_spec(spec, total):
     return pages
 
 
+def pdf_delete_pages(src, spec, out):
+    """Grava em `out` o PDF `src` sem as paginas indicadas em `spec`.
+
+    `spec` e a string aceita por parse_page_spec (ex.: '1,3,5-8').
+    Levanta ValueError se removeria todas as paginas.
+    """
+    if not src or not os.path.isfile(src):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(src, strict=False)
+    total = len(reader.pages)
+    remove = parse_page_spec(spec, total)
+    keep = [i for i in range(total) if (i + 1) not in remove]
+    if not keep:
+        raise ValueError("Isso removeria todas as paginas do PDF.")
+    writer = PdfWriter()
+    for i in keep:
+        writer.add_page(reader.pages[i])
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "kept": len(keep),
+            "removed": total - len(keep), "total": total}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
