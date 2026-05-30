@@ -1759,6 +1759,45 @@ function baseName(p){const a=(p||"").split(/[\\/]+/).filter(Boolean);return a.le
 function sameLower(a,b){return (a||"").toLowerCase()===(b||"").toLowerCase();}
 function extOf(name){const i=name.lastIndexOf(".");return i>0?name.slice(i+1).toLowerCase():"";}
 async function chooseFolder(start){return api("/api/choose-folder",{start});}
+async function uploadFile(file){
+  const r=await fetch("/api/upload?name="+encodeURIComponent(file.name),{method:"POST",body:file});
+  return r.json();
+}
+function makeDrop(el,onPdf){
+  if(!el) return;
+  el.addEventListener("dragover",e=>{e.preventDefault();el.classList.add("dragover");});
+  el.addEventListener("dragleave",()=>el.classList.remove("dragover"));
+  el.addEventListener("drop",async e=>{
+    e.preventDefault();el.classList.remove("dragover");
+    const files=[...(e.dataTransfer.files||[])].filter(f=>/\.pdf$/i.test(f.name));
+    if(!files.length){toast("Solte um arquivo PDF.");return;}
+    for(const f of files){const r=await uploadFile(f);if(r.ok)onPdf(r.path,r.name,true);else toast(r.error||"Falha no upload.");}
+  });
+}
+function downloadLink(serverPath,label){
+  const url="/file?path="+encodeURIComponent(serverPath);
+  return '<a class="btn-link" href="'+url+'" download>'+esc(label||"baixar arquivo")+'</a>';
+}
+function cmpName(a,b,numeric){return a.localeCompare(b,undefined,{numeric:numeric,sensitivity:'base'});}
+function sortItems(items,mode){
+  const arr=items.slice();
+  arr.sort((a,b)=>{
+    if(a.is_dir!==b.is_dir)return a.is_dir?-1:1;
+    if(mode==='natural')return cmpName(a.name,b.name,true);
+    if(mode==='za')return cmpName(b.name,a.name,false);
+    return cmpName(a.name,b.name,false); // 'az'
+  });
+  return arr;
+}
+function attachSort(barEl,getItems,setItems,reRender){
+  if(!barEl) return;
+  barEl.querySelectorAll(".sortbtn").forEach(btn=>btn.addEventListener("click",()=>{
+    const mode=btn.dataset.sort;
+    barEl.querySelectorAll(".sortbtn").forEach(b=>b.classList.toggle("on",b===btn));
+    setItems(sortItems(getItems(),mode));
+    reRender();
+  }));
+}
 
 let canUndo=false;
 function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
