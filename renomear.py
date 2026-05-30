@@ -495,6 +495,225 @@ def pdf_save_outline(pdf_path, out_path, items):
 
 
 # ----------------------------------------------------------------------------
+# Paginas: excluir / juntar / comprimir / marcadores em txt
+# ----------------------------------------------------------------------------
+
+def parse_page_spec(spec, total):
+    """Converte '1,3,5-8' em um conjunto de paginas 1-based validas (1..total).
+
+    Aceita virgula ou ponto-e-virgula como separador e faixas 'a-b' (em
+    qualquer ordem). Levanta ValueError em entrada invalida ou fora do intervalo.
+    """
+    if total <= 0:
+        raise ValueError("PDF sem paginas.")
+    pages = set()
+    for tok in (spec or "").replace(";", ",").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "-" in tok:
+            a, _, b = tok.partition("-")
+            try:
+                start, end = int(a.strip()), int(b.strip())
+            except ValueError:
+                raise ValueError(f'Trecho invalido: "{tok}".')
+            if start > end:
+                start, end = end, start
+            pages.update(range(start, end + 1))
+        else:
+            try:
+                pages.add(int(tok))
+            except ValueError:
+                raise ValueError(f'Numero invalido: "{tok}".')
+    if not pages:
+        raise ValueError("Nenhuma pagina informada.")
+    bad = sorted(p for p in pages if p < 1 or p > total)
+    if bad:
+        raise ValueError(f"Fora do intervalo 1..{total}: {', '.join(map(str, bad))}.")
+    return pages
+
+
+def pdf_delete_pages(src, spec, out):
+    """Grava em `out` o PDF `src` sem as paginas indicadas em `spec`.
+
+    `spec` e a string aceita por parse_page_spec (ex.: '1,3,5-8').
+    Levanta ValueError se removeria todas as paginas.
+    """
+    if not src or not os.path.isfile(src):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(src, strict=False)
+    total = len(reader.pages)
+    remove = parse_page_spec(spec, total)
+    keep = [i for i in range(total) if (i + 1) not in remove]
+    if not keep:
+        raise ValueError("Isso removeria todas as paginas do PDF.")
+    writer = PdfWriter()
+    for i in keep:
+        writer.add_page(reader.pages[i])
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "kept": len(keep),
+            "removed": total - len(keep), "total": total}
+
+
+def pdf_merge(items, out, bookmark_mode="file"):
+    """Junta varios PDFs (na ordem de `items`) num unico arquivo `out`.
+
+    items: lista de {"path": ..., "title"?: ..., "group"?: ...}
+    bookmark_mode: "file" (1 marcador por arquivo), "folder" (agrupa por pasta
+    de origem: pasta = nivel 1, arquivo = nivel 2) ou "none".
+    """
+    if not items:
+        raise ValueError("Nenhum PDF para juntar.")
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    group_parents = {}
+    files = 0
+    for it in items:
+        path = it.get("path", "")
+        if not path or not os.path.isfile(path):
+            raise ValueError(f"PDF nao encontrado: {path}")
+        reader = PdfReader(path, strict=False)
+        start = len(writer.pages)
+        for pg in reader.pages:
+            writer.add_page(pg)
+        title = (it.get("title") or "").strip() or os.path.splitext(os.path.basename(path))[0]
+        if bookmark_mode == "folder":
+            group = (it.get("group") or os.path.basename(os.path.dirname(os.path.abspath(path)))
+                     or "(raiz)")
+            parent = group_parents.get(group)
+            if parent is None:
+                parent = writer.add_outline_item(group, start)
+                group_parents[group] = parent
+            writer.add_outline_item(title, start, parent=parent)
+        elif bookmark_mode != "none":
+            writer.add_outline_item(title, start)
+        files += 1
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "files": files, "pages": len(writer.pages)}
+
+
+def outline_to_txt(bookmarks):
+    """Formata a lista plana de marcadores (de pdf_outline) como texto indentado."""
+    if not bookmarks:
+        return "(Este PDF nao tem marcadores.)\n"
+    lines = []
+    for b in bookmarks:
+        try:
+            depth = max(1, int(b.get("depth", 1)))
+        except (TypeError, ValueError):
+            depth = 1
+        title = str(b.get("title", "")).strip() or "(sem titulo)"
+        page = b.get("page")
+        indent = "  " * (depth - 1)
+        lines.append(f"{indent}{title}  (p.{page})" if page else f"{indent}{title}")
+    return "\n".join(lines) + "\n"
+
+
+GS_PRESETS = {"max": "/screen", "balance": "/ebook", "high": "/printer"}
+
+
+def resolve_ghostscript():
+    """Retorna o caminho do executavel do Ghostscript, ou None se nao achar.
+
+    Procura, nesta ordem: pasta embutida no .exe (_MEIPASS/gs/), copia
+    vendorizada ao lado do script (./gs/), e por fim o PATH do sistema.
+    """
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates += [os.path.join(base, "gs", "gswin64c.exe"),
+                       os.path.join(base, "gs", "gswin32c.exe")]
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates += [os.path.join(here, "gs", "gswin64c.exe"),
+                   os.path.join(here, "gs", "gswin32c.exe")]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    for name in ("gswin64c", "gswin32c", "gs"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def pdf_compress(src, out, quality="balance"):
+    """Comprime `src` em `out` via Ghostscript.
+
+    quality: 'max' (maxima compressao, /screen), 'balance' (/ebook),
+    'high' (alta qualidade, /printer).
+    """
+    if not src or not os.path.isfile(src):
+        raise ValueError("PDF nao encontrado.")
+    gs = resolve_ghostscript()
+    if not gs:
+        raise ValueError("Ghostscript nao encontrado. (Necessario para comprimir.)")
+    preset = GS_PRESETS.get(quality, "/ebook")
+    before = os.path.getsize(src)
+    tmp = out + ".tmp"
+    cmd = [gs, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+           f"-dPDFSETTINGS={preset}", "-dNOPAUSE", "-dBATCH", "-dQUIET",
+           "-sOutputFile=" + tmp, src]
+    proc = subprocess.run(cmd, capture_output=True,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if proc.returncode != 0 or not os.path.isfile(tmp):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        detail = proc.stderr.decode("utf-8", "ignore")[:200] if proc.stderr else ""
+        raise ValueError("Falha ao comprimir (Ghostscript). " + detail)
+    os.replace(tmp, out)
+    after = os.path.getsize(out)
+    saved = round((1 - after / before) * 100, 1) if before else 0.0
+    return {"ok": True, "path": out, "before": before, "after": after, "saved_pct": saved}
+
+
+_UPLOAD_DIR = None
+
+
+def upload_dir():
+    global _UPLOAD_DIR
+    if _UPLOAD_DIR is None or not os.path.isdir(_UPLOAD_DIR):
+        _UPLOAD_DIR = tempfile.mkdtemp(prefix="renomear_up_")
+    return _UPLOAD_DIR
+
+
+def save_upload(name, data):
+    """Grava bytes de um PDF arrastado num diretorio temporario; devolve o caminho."""
+    safe = suggest_name(os.path.basename(name or "arquivo.pdf")) or "arquivo.pdf"
+    if not safe.lower().endswith(".pdf"):
+        safe += ".pdf"
+    udir = upload_dir()
+    dest = _unique_name(udir, safe)
+    full = os.path.join(udir, dest)
+    with open(full, "wb") as f:
+        f.write(data)
+    return full
+
+
+def _backup_for_undo(path):
+    """Copia `path` para um temporario e devolve o caminho do backup."""
+    fd, tmp = tempfile.mkstemp(suffix=".pdf", prefix="renomear_bak_")
+    os.close(fd)
+    try:
+        shutil.copy2(path, tmp)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return tmp
+
+
+# ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
 
@@ -618,6 +837,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if urlparse(self.path).path == "/api/upload":
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length) if length else b""
+                name = parse_qs(urlparse(self.path).query).get("name", ["arquivo.pdf"])[0]
+                try:
+                    full = save_upload(name, raw)
+                    self._send(200, {"ok": True, "path": full, "name": os.path.basename(full)})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+                return
+
             data = self._read_json()
 
             if self.path == "/api/choose-folder":
@@ -731,6 +961,69 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, pdf_split(pdf, dest, data.get("ranges", []),
                                           auto_suffix=bool(data.get("auto"))))
 
+            elif self.path == "/api/gs-check":
+                self._send(200, {"available": resolve_ghostscript() is not None})
+
+            elif self.path == "/api/pdf-delete":
+                pdf = data.get("pdf", "")
+                spec = data.get("pages", "")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + " (sem paginas).pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    res = pdf_delete_pages(pdf, spec, out)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-merge":
+                items = data.get("items", [])
+                out = (data.get("out") or "").strip()
+                mode = data.get("mode", "file")
+                if not out:
+                    self._send(200, {"ok": False, "error": "Caminho de saida nao informado."})
+                    return
+                if not out.lower().endswith(".pdf"):
+                    out += ".pdf"
+                try:
+                    self._send(200, pdf_merge(items, out, mode))
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-compress":
+                pdf = data.get("pdf", "")
+                quality = data.get("quality", "balance")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + " (comprimido).pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    res = pdf_compress(pdf, out, quality)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-outline-txt":
+                try:
+                    o = pdf_outline(data.get("path", ""))
+                    self._send(200, {"ok": True, "content": outline_to_txt(o["bookmarks"]),
+                                     "filename": "marcadores.txt"})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
                     self._send(200, {"ok": False, "error": "Nada para desfazer."})
@@ -766,6 +1059,15 @@ class Handler(BaseHTTPRequestHandler):
                         except OSError:
                             pass
                     msg = f"{n} arquivo(s) movido(s) de volta."
+                elif t == "restore":
+                    target, backup = op.get("target"), op.get("backup")
+                    if backup and os.path.isfile(backup):
+                        shutil.copy2(backup, target)
+                        try:
+                            os.remove(backup)
+                        except OSError:
+                            pass
+                    msg = "Arquivo restaurado."
                 else:
                     self._send(200, {"ok": False, "error": "Operacao desconhecida."})
                     return
@@ -922,6 +1224,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .row2{display:flex;gap:18px;flex-wrap:wrap}
   .row2>div{flex:1;min-width:210px}
   .box{background:#f6f6f6;padding:12px 14px;margin:11px 0}
+  .drop{border:1px dashed #999;padding:14px;margin:10px 0;text-align:center;font-style:italic;color:#555;cursor:default}
+  .drop.dragover{border-color:#000;background:#f0f0f0;color:#000}
+  .sortctl{font-size:13.5px;margin-left:8px}
+  .sortbtn{font-size:13px;padding:2px 7px;margin-left:3px}
+  .sortbtn.on{font-weight:bold;background:#eee}
+  .mglist-row{display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid #eee}
+  .mglist-row .nm{flex:1;min-width:0;word-break:break-word}
+  .mglist-row .pg{font-style:italic;font-size:13px;color:#555}
 
   .actionbar{margin-top:12px}
   .actionbar button{margin-left:5px;margin-bottom:4px}
@@ -998,7 +1308,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="organize">Organizar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="export">Exportar lista</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="pdf">Extrair Páginas</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="delpages">Excluir Páginas</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="divide">Dividir PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="merge">Juntar PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="compress">Comprimir PDF</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="marks">Marcadores</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="compare">Comparar Arquivos</button>
   </p>
@@ -1010,6 +1323,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="rnPick">Escolher pasta</button>
       <button id="rnUp" disabled>Subir</button>
       <button id="rnReload" disabled>Recarregar</button>
+      <span class="sortctl" id="rnSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
       <button id="rnPaste" disabled>Colar nomes</button>
       <button id="rnClear" disabled>Limpar</button>
     </div>
@@ -1038,6 +1352,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="btPick">Escolher pasta</button>
       <span class="pathbox" id="btPath">Nenhuma pasta selecionada</span>
       <button id="btReload" disabled>Recarregar</button>
+      <span class="sortctl" id="btSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
     </div>
     <div class="box">
       <div class="row2">
@@ -1092,6 +1407,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="xlPick">Escolher pasta</button>
       <span class="pathbox" id="xlPath">Nenhuma pasta selecionada</span>
       <button id="xlReload" disabled>Recarregar</button>
+      <span class="sortctl" id="xlSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
       <button id="xlCopy" disabled>Copiar nomes atuais</button>
     </div>
     <div class="field">
@@ -1292,6 +1608,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <button id="mkPaste" disabled>Colar lista</button>
           <button id="mkDivide" disabled>Dividir por estes</button>
           <button class="btn-primary" id="mkSave" disabled>Salvar marcadores</button>
+          <button id="mkExportTxt">Exportar lista (.txt)</button>
         </div>
         <p class="hint">Edite título, página e nível. Use <b>⇥</b>/<b>⇤</b> para mudar o nível e <b>↑</b>/<b>↓</b> para reordenar.</p>
         <div id="mkList"></div>
@@ -1301,6 +1618,91 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="preview-box" id="mkPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
       </div>
     </div>
+  </section>
+
+  <!-- ===== EXCLUIR PAGINAS ===== -->
+  <section class="panel" id="panel-delpages">
+    <div class="toolbar">
+      <button class="btn-primary" id="dpPick">Escolher PDF</button>
+      <span class="pathbox" id="dpPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="dpDrop">Arraste um PDF aqui</div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Páginas a excluir</span>
+        <input type="text" id="dpPages" placeholder="ex.: 1, 3, 5-8, 12">
+        <p class="hint" id="dpInfo"></p>
+      </div>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="dpMode" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="dpMode" value="over" id="dpOver"> Sobrescrever o original</label>
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="dpCount">Escolha um PDF.</span>
+      <button id="dpUndo" disabled>Desfazer</button>
+      <button id="dpGo" disabled class="btn-primary">Excluir páginas</button>
+    </div>
+    <div id="dpResult"></div>
+  </section>
+
+  <!-- ===== JUNTAR PDF ===== -->
+  <section class="panel" id="panel-merge">
+    <div class="toolbar">
+      <button class="btn-primary" id="mgAdd">Adicionar PDF(s)</button>
+      <button id="mgClear" disabled>Limpar lista</button>
+    </div>
+    <div class="drop" id="mgDrop">Arraste um ou mais PDFs aqui</div>
+    <div id="mgList"></div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Marcadores</span>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="mgBm" value="file" checked> Um marcador por arquivo</label>
+          <label class="opt"><input type="radio" name="mgBm" value="folder"> Agrupar por pasta de origem</label>
+          <label class="opt"><input type="radio" name="mgBm" value="none"> Sem marcadores</label>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Nome do arquivo final</span>
+        <input type="text" id="mgName" value="Juntado.pdf" style="width:60%">
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="mgCount">Adicione ao menos 2 PDFs.</span>
+      <button id="mgGo" disabled class="btn-primary">Juntar PDF</button>
+    </div>
+    <div id="mgResult"></div>
+  </section>
+
+  <!-- ===== COMPRIMIR PDF ===== -->
+  <section class="panel" id="panel-compress">
+    <div class="toolbar">
+      <button class="btn-primary" id="cpPick">Escolher PDF</button>
+      <span class="pathbox" id="cpPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="cpDrop">Arraste um PDF aqui</div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Qualidade / compressão</span>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="cpQ" value="max"> Máxima compressão (~72 dpi)</label>
+          <label class="opt"><input type="radio" name="cpQ" value="balance" checked> Equilíbrio (~150 dpi)</label>
+          <label class="opt"><input type="radio" name="cpQ" value="high"> Alta qualidade (~300 dpi)</label>
+        </div>
+      </div>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="cpMode" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="cpMode" value="over"> Sobrescrever o original</label>
+      </div>
+      <p class="hint" id="cpGsWarn" style="display:none"><b>Ghostscript não encontrado</b> — a compressão ficará indisponível.</p>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="cpCount">Escolha um PDF.</span>
+      <button id="cpUndo" disabled>Desfazer</button>
+      <button id="cpGo" disabled class="btn-primary">Comprimir</button>
+    </div>
+    <div id="cpResult"></div>
   </section>
 
   <!-- ===== COMPARAR ARQUIVOS ===== -->
@@ -1361,9 +1763,39 @@ function baseName(p){const a=(p||"").split(/[\\/]+/).filter(Boolean);return a.le
 function sameLower(a,b){return (a||"").toLowerCase()===(b||"").toLowerCase();}
 function extOf(name){const i=name.lastIndexOf(".");return i>0?name.slice(i+1).toLowerCase():"";}
 async function chooseFolder(start){return api("/api/choose-folder",{start});}
+async function uploadFile(file){
+  const r=await fetch("/api/upload?name="+encodeURIComponent(file.name),{method:"POST",body:file});
+  return r.json();
+}
+function makeDrop(el,onPdf){
+  if(!el) return;
+  el.addEventListener("dragover",e=>{e.preventDefault();el.classList.add("dragover");});
+  el.addEventListener("dragleave",()=>el.classList.remove("dragover"));
+  el.addEventListener("drop",async e=>{
+    e.preventDefault();el.classList.remove("dragover");
+    const files=[...(e.dataTransfer.files||[])].filter(f=>/\.pdf$/i.test(f.name));
+    if(!files.length){toast("Solte um arquivo PDF.");return;}
+    for(const f of files){const r=await uploadFile(f);if(r.ok)onPdf(r.path,r.name,true);else toast(r.error||"Falha no upload.");}
+  });
+}
+function downloadLink(serverPath,label){
+  const url="/file?path="+encodeURIComponent(serverPath);
+  return '<a class="btn-link" href="'+url+'" download>'+esc(label||"baixar arquivo")+'</a>';
+}
+function cmpName(a,b,numeric){return a.localeCompare(b,undefined,{numeric:numeric,sensitivity:'base'});}
+function sortItems(items,mode){
+  const arr=items.slice();
+  arr.sort((a,b)=>{
+    if(a.is_dir!==b.is_dir)return a.is_dir?-1:1;
+    if(mode==='natural')return cmpName(a.name,b.name,true);
+    if(mode==='za')return cmpName(b.name,a.name,false);
+    return cmpName(a.name,b.name,false); // 'az'
+  });
+  return arr;
+}
 
 let canUndo=false;
-function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
+function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo","dpUndo","cpUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
 
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
@@ -1374,7 +1806,7 @@ document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
 // ===================================================================
 //  RENOMEAR (manual) + PRE-VISUALIZACAO
 // ===================================================================
-const RN={root:null,current:null,parent:null,items:[],sel:-1};
+const RN={root:null,current:null,parent:null,items:[],sel:-1,sortMode:'natural'};
 function rnCrumbsArr(){
   const c=[{name:baseName(RN.root)||RN.root,path:RN.root}];
   if(RN.current.length>RN.root.length && RN.current.toLowerCase().startsWith(RN.root.toLowerCase())){
@@ -1452,7 +1884,7 @@ function rnUpd(){
   q("rnClear").disabled=!RN.items.length;q("rnReload").disabled=!RN.current;q("rnPaste").disabled=!RN.items.length;
   q("rnUp").disabled=!RN.current||sameLower(RN.current,RN.root);q("rnUndo").disabled=!canUndo;
 }
-function rnAll(){rnRenderCrumbs();rnRender();rnUpd();}
+function rnAll(){RN.items=sortItems(RN.items,RN.sortMode||'natural');rnRenderCrumbs();rnRender();rnUpd();}
 function rnHasPending(){return rnPending().n>0;}
 function rnNav(path){if(rnHasPending())confirmModal("Sair desta pasta?","Você digitou nomes que ainda não foram aplicados. Eles serão descartados.","Sair sem aplicar",()=>rnDo(path));else rnDo(path);}
 async function rnDo(path){closeModal();const r=await api("/api/list",{path});if(r.error){toast(r.error);return;}RN.current=r.path;RN.parent=r.parent;RN.items=r.items;rnAll();}
@@ -1473,11 +1905,12 @@ q("rnPreview").addEventListener("click",async()=>{const r=await api("/api/valida
 q("rnRename").addEventListener("click",async()=>{const r=await api("/api/validate",{folder:RN.current,renames:rnCollect()});showPreview(r,true,rnApply);});
 async function rnApply(){const r=await api("/api/rename",{folder:RN.current,renames:rnCollect()});closeModal();if(!r.ok){toast(r.error||"Falha ao renomear.");return;}setCanUndo(!!r.can_undo);RN.current=r.path;RN.parent=r.parent;RN.items=r.items;rnAll();toast(r.renamed+" renomeado(s).");}
 q("rnUndo").addEventListener("click",undoLast);
+q("rnSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{RN.sortMode=b.dataset.sort;RN.items=sortItems(RN.items,RN.sortMode);rnRenderCrumbs();rnRender();rnUpd();q("rnSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 
 // ===================================================================
 //  RENOMEAR EM LOTE
 // ===================================================================
-const BT={folder:null,items:[]};
+const BT={folder:null,items:[],sortMode:'natural'};
 function noAccents(s){return s.normalize("NFD").replace(/[̀-ͯ]/g,"");}
 function applyCase(s,mode){
   if(mode==="upper")return s.toUpperCase();
@@ -1514,6 +1947,7 @@ function btCompute(){
   return rows;
 }
 function btRender(){
+  BT.items=sortItems(BT.items,BT.sortMode||'natural');
   const area=q("btTable");
   if(!BT.items.length){area.innerHTML='<div class="empty">Escolha uma pasta para ver a prévia.</div>';q("btCount").textContent="—";q("btApply").disabled=true;return;}
   const rows=btCompute();let html="";
@@ -1548,6 +1982,7 @@ q("btApply").addEventListener("click",()=>{
     setCanUndo(!!r.can_undo);BT.items=r.items;btRender();toast(r.renamed+" renomeado(s).");});
 });
 q("btUndo").addEventListener("click",undoLast);
+q("btSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{BT.sortMode=b.dataset.sort;btRender();q("btSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 
 // ===================================================================
 //  CRIAR
@@ -1621,9 +2056,10 @@ q("exGen").addEventListener("click",async()=>{
 // ===================================================================
 //  COLAR DO EXCEL
 // ===================================================================
-const XL={folder:null,items:[],filtered:[]};
+const XL={folder:null,items:[],filtered:[],sortMode:'natural'};
 function xlScope(){return (document.querySelector('input[name=xlScope]:checked')||{}).value||"all";}
 function xlBuild(){
+  XL.items=sortItems(XL.items,XL.sortMode||'natural');
   const sc=xlScope();
   XL.filtered=XL.items.filter(it=>sc==="all"||(sc==="files"&&!it.is_dir)||(sc==="dirs"&&it.is_dir));
   q("xlCurrent").value=XL.filtered.map(it=>it.name).join("\n");
@@ -1653,6 +2089,7 @@ q("xlCopy").addEventListener("click",()=>{const txt=XL.filtered.map(it=>it.name)
 q("xlRename").addEventListener("click",async()=>{const r=await api("/api/validate",{folder:XL.folder,renames:xlRenames()});showPreview(r,true,xlApply);});
 async function xlApply(){const r=await api("/api/rename",{folder:XL.folder,renames:xlRenames()});closeModal();if(!r.ok){toast(r.error||"Falha ao renomear.");return;}setCanUndo(!!r.can_undo);XL.items=r.items;q("xlNew").value="";xlBuild();toast(r.renamed+" renomeado(s).");}
 q("xlUndo").addEventListener("click",undoLast);
+q("xlSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{XL.sortMode=b.dataset.sort;xlBuild();q("xlSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 // sincroniza rolagem das duas colunas
 ["xlCurrent","xlNew"].forEach((a,i)=>{const b=["xlCurrent","xlNew"][1-i];q(a).addEventListener("scroll",()=>{const o=q(b);if(o.scrollTop!==q(a).scrollTop)o.scrollTop=q(a).scrollTop;});});
 
@@ -2036,7 +2473,148 @@ q("mkDivide").addEventListener("click",()=>{
     toast("✓ "+r.results.length+" PDF(s) gerado(s) na subpasta 'Dividido'.");
   });
 });
+q("mkExportTxt").addEventListener("click",async()=>{
+  if(!MK.pdf){toast("Escolha um PDF primeiro.");return;}
+  const r=await api("/api/pdf-outline-txt",{path:MK.pdf});
+  if(!r.ok){toast(r.error||"Falha ao exportar.");return;}
+  const blob=new Blob([r.content],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=(MK.name||"marcadores")+" - marcadores.txt";
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+  toast("Lista de marcadores baixada.");
+});
 mkRender();
+
+// ===================================================================
+//  EXCLUIR PAGINAS
+// ===================================================================
+const DP={pdf:null,name:"",pages:0,fromUpload:false};
+function dpUpd(){
+  const hasSpec=q("dpPages").value.trim()!=="";
+  q("dpGo").disabled=!(DP.pdf&&hasSpec);
+  q("dpOver").disabled=DP.fromUpload;
+  q("dpUndo").disabled=!canUndo;
+}
+async function dpLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  DP.pdf=path;DP.name=r.name;DP.pages=r.pages;DP.fromUpload=!!fromUpload;
+  q("dpPath").textContent=r.name;q("dpPath").title=path;
+  q("dpInfo").textContent="O PDF tem "+r.pages+" página(s).";
+  q("dpCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector('input[name=dpMode][value=new]');if(m)m.checked=true;}
+  dpUpd();
+}
+q("dpPick").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;dpLoad(r.path,baseName(r.path),false);
+});
+makeDrop(q("dpDrop"),(p,n)=>dpLoad(p,n,true));
+q("dpPages").addEventListener("input",dpUpd);
+q("dpUndo").addEventListener("click",undoLast);
+q("dpGo").addEventListener("click",async()=>{
+  const overwrite=(document.querySelector('input[name=dpMode]:checked')||{}).value==="over" && !DP.fromUpload;
+  q("dpGo").disabled=true;q("dpGo").textContent="Excluindo…";
+  const r=await api("/api/pdf-delete",{pdf:DP.pdf,pages:q("dpPages").value,overwrite});
+  q("dpGo").textContent="Excluir páginas";
+  if(!r.ok){toast(r.error||"Falha.");dpUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("dpResult").innerHTML='<p class="hint">✓ Geradas '+r.kept+' página(s) (removidas '+r.removed+'). '
+    +(DP.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
+  dpUpd();
+});
+
+// ===================================================================
+//  JUNTAR PDF
+// ===================================================================
+const MG={list:[]}; // cada item: {path,name,pages,group}
+function mgRender(){
+  const box=q("mgList");
+  if(!MG.list.length){box.innerHTML='<div class="empty">Nenhum PDF na lista.</div>';mgUpd();return;}
+  box.innerHTML=MG.list.map((it,i)=>(
+    '<div class="mglist-row">'
+    +'<span class="pg">#'+(i+1)+'</span>'
+    +'<span class="nm">'+esc(it.name)+' <span class="pg">('+it.pages+' pág.)</span></span>'
+    +'<button class="btn-link" data-up="'+i+'" '+(i===0?'disabled':'')+'>↑</button>'
+    +'<button class="btn-link" data-down="'+i+'" '+(i===MG.list.length-1?'disabled':'')+'>↓</button>'
+    +'<button class="btn-link" data-del="'+i+'">remover</button>'
+    +'</div>')).join("");
+  box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[MG.list[i-1],MG.list[i]]=[MG.list[i],MG.list[i-1]];mgRender();}));
+  box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[MG.list[i+1],MG.list[i]]=[MG.list[i],MG.list[i+1]];mgRender();}));
+  box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{MG.list.splice(+b.dataset.del,1);mgRender();}));
+  mgUpd();
+}
+function mgUpd(){
+  q("mgGo").disabled=MG.list.length<2;
+  q("mgClear").disabled=!MG.list.length;
+  q("mgCount").textContent=MG.list.length?(MG.list.length+" PDF(s) na lista."):"Adicione ao menos 2 PDFs.";
+}
+async function mgAddPath(path,name){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido: "+name);return;}
+  MG.list.push({path,name:r.name,pages:r.pages,group:""});
+  mgRender();
+}
+q("mgAdd").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;await mgAddPath(r.path,baseName(r.path));
+});
+makeDrop(q("mgDrop"),(p,n)=>mgAddPath(p,n));
+q("mgClear").addEventListener("click",()=>{MG.list=[];mgRender();});
+q("mgGo").addEventListener("click",async()=>{
+  const mode=(document.querySelector('input[name=mgBm]:checked')||{}).value||"file";
+  let name=(q("mgName").value||"Juntado.pdf").trim();
+  const firstReal=MG.list.find(it=>!/renomear_up_/.test(it.path));
+  const baseItem=firstReal||MG.list[0];
+  const folder=baseItem?baseItem.path.replace(/[\\/][^\\/]+$/,""):"";
+  const out=(folder?folder+"\\":"")+name;
+  q("mgGo").disabled=true;q("mgGo").textContent="Juntando…";
+  const items=MG.list.map(it=>({path:it.path,title:it.name.replace(/\.pdf$/i,""),group:it.group}));
+  const r=await api("/api/pdf-merge",{items,out:out,mode});
+  q("mgGo").textContent="Juntar PDF";mgUpd();
+  if(!r.ok){toast(r.error||"Falha ao juntar.");return;}
+  q("mgResult").innerHTML='<p class="hint">✓ '+r.files+' PDF(s) juntos, '+r.pages+' página(s). '
+    +(firstReal?"Salvo em: "+esc(baseName(r.path)):downloadLink(r.path,"baixar PDF juntado"))+'</p>';
+});
+mgRender();
+
+// ===================================================================
+//  COMPRIMIR PDF
+// ===================================================================
+const CP={pdf:null,name:"",fromUpload:false,gsOk:true};
+function fmtKB(n){return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";}
+function cpUpd(){
+  q("cpGo").disabled=!(CP.pdf&&CP.gsOk);
+  const over=document.querySelector('input[name=cpMode][value=over]');if(over)over.disabled=CP.fromUpload;
+  q("cpUndo").disabled=!canUndo;
+}
+async function cpLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  CP.pdf=path;CP.name=r.name;CP.fromUpload=!!fromUpload;
+  q("cpPath").textContent=r.name;q("cpPath").title=path;q("cpCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector('input[name=cpMode][value=new]');if(m)m.checked=true;}
+  cpUpd();
+}
+(async()=>{const g=await api("/api/gs-check",{});CP.gsOk=!!g.available;if(!g.available)q("cpGsWarn").style.display="";cpUpd();})();
+q("cpPick").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;cpLoad(r.path,baseName(r.path),false);
+});
+makeDrop(q("cpDrop"),(p,n)=>cpLoad(p,n,true));
+q("cpUndo").addEventListener("click",undoLast);
+q("cpGo").addEventListener("click",async()=>{
+  const quality=(document.querySelector('input[name=cpQ]:checked')||{}).value||"balance";
+  const overwrite=(document.querySelector('input[name=cpMode]:checked')||{}).value==="over" && !CP.fromUpload;
+  q("cpGo").disabled=true;q("cpGo").textContent="Comprimindo…";
+  const r=await api("/api/pdf-compress",{pdf:CP.pdf,quality,overwrite});
+  q("cpGo").textContent="Comprimir";
+  if(!r.ok){toast(r.error||"Falha ao comprimir.");cpUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("cpResult").innerHTML='<p class="hint">✓ '+fmtKB(r.before)+' → <b>'+fmtKB(r.after)+'</b> (−'+r.saved_pct+'%). '
+    +(CP.fromUpload?downloadLink(r.path,"baixar PDF comprimido"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
+  cpUpd();
+});
 
 // ===================================================================
 //  Desfazer global + Modal

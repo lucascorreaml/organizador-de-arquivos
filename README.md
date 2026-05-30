@@ -58,6 +58,19 @@ O app roda **localmente** na sua máquina e só acessa as pastas que você escol
 - Interface em **HTML/CSS/JS** embutida, servida localmente em `127.0.0.1`.
 - Empacotado como `.exe` com **PyInstaller** (a pypdf vai junto, embutida).
 
+## 🆕 Novidades v1.4
+
+- **Excluir Páginas** — remove páginas específicas de um PDF (ex.: `1, 3, 5-8`); salva como novo arquivo ou sobrescreve o original (com desfazer).
+- **Juntar PDF** — junta vários PDFs numa ordem definida, com marcadores (um por arquivo, agrupado por pasta, ou nenhum).
+- **Comprimir PDF** — reduz o tamanho via Ghostscript (Máxima compressão / Equilíbrio / Alta qualidade); mostra antes → depois.
+- **Exportar marcadores (.txt)** — gera a lista de marcadores do PDF indentada por nível.
+- **Ordenação** — Natural (estilo Windows) / A-Z / Z-A nas listagens de Renomear, Lote e Colar do Excel.
+- **Arrastar PDF** — solte um PDF nas abas de PDF (envio ao servidor local).
+
+> A compressão usa **Ghostscript** (licença AGPL), embutido no executável.
+
+---
+
 ## 📄 Licença
 
 Projeto pessoal — sinta-se à vontade para usar e adaptar.
