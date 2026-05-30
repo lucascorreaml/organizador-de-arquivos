@@ -280,3 +280,9 @@ def test_pdf_set_password_vazia(pdf_factory, tmp_path):
     src = pdf_factory("s.pdf", 1)
     with pytest.raises(ValueError):
         renomear.pdf_set_password(src, str(tmp_path / "o.pdf"), "")
+
+
+def test_save_upload_aceita_imagem(tmp_path, monkeypatch):
+    monkeypatch.setattr(renomear, "_UPLOAD_DIR", str(tmp_path))
+    full = renomear.save_upload("foto.PNG", b"\x89PNG")
+    assert full.lower().endswith(".png")

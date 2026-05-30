@@ -685,11 +685,15 @@ def upload_dir():
     return _UPLOAD_DIR
 
 
+ALLOWED_UPLOAD_EXTS = {"pdf", "jpg", "jpeg", "png", "bmp", "gif", "webp", "tif", "tiff"}
+
+
 def save_upload(name, data):
-    """Grava bytes de um PDF arrastado num diretorio temporario; devolve o caminho."""
-    safe = suggest_name(os.path.basename(name or "arquivo.pdf")) or "arquivo.pdf"
-    if not safe.lower().endswith(".pdf"):
-        safe += ".pdf"
+    """Grava bytes de um arquivo arrastado (PDF ou imagem) num temporario."""
+    safe = suggest_name(os.path.basename(name or "arquivo.pdf")) or "arquivo"
+    ext = os.path.splitext(safe)[1].lower().lstrip(".")
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        safe = os.path.splitext(safe)[0] + ".pdf"
     udir = upload_dir()
     dest = _unique_name(udir, safe)
     full = os.path.join(udir, dest)
