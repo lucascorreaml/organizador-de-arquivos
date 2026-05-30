@@ -160,3 +160,25 @@ def test_backup_for_undo_copia_e_restaura(pdf_factory, tmp_path):
     finally:
         if os.path.isfile(bak):
             os.remove(bak)
+
+
+def test_split_by_size_limite_grande_uma_parte(pdf_factory, tmp_path):
+    src = pdf_factory("s.pdf", 6)
+    d = str(tmp_path / "out")
+    res = renomear.pdf_split_by_size(src, d, 100)
+    assert res["ok"] and res["parts"] == 1
+    assert res["results"][0]["count"] == 6
+
+def test_split_by_size_limite_minusculo_uma_pagina_por_parte(pdf_factory, tmp_path):
+    src = pdf_factory("s.pdf", 4)
+    d = str(tmp_path / "out")
+    res = renomear.pdf_split_by_size(src, d, 0.00001)
+    assert res["parts"] == 4
+    assert sum(r["count"] for r in res["results"]) == 4
+    assert res["oversize"] == [1, 2, 3, 4]
+
+def test_split_by_size_invalido(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 2)
+    with pytest.raises(ValueError):
+        renomear.pdf_split_by_size(src, str(tmp_path / "o"), 0)

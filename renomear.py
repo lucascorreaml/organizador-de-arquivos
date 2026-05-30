@@ -714,6 +714,63 @@ def _backup_for_undo(path):
 
 
 # ----------------------------------------------------------------------------
+# v1.5: dividir por tamanho / girar+reordenar / imagens / senha
+# ----------------------------------------------------------------------------
+
+def pdf_split_by_size(pdf_path, dest_folder, max_mb, base_name=None):
+    """Divide `pdf_path` em partes sequenciais, cada uma <= max_mb (preenchimento guloso)."""
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    try:
+        max_bytes = int(float(max_mb) * 1024 * 1024)
+    except (TypeError, ValueError):
+        raise ValueError("Tamanho maximo invalido.")
+    if max_bytes <= 0:
+        raise ValueError("Tamanho maximo deve ser maior que zero.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(pdf_path, strict=False)
+    total = len(reader.pages)
+    if total == 0:
+        raise ValueError("PDF sem paginas.")
+    base = (base_name or os.path.splitext(os.path.basename(pdf_path))[0]).strip() or "parte"
+
+    def measure(idxs):
+        w = PdfWriter()
+        for j in idxs:
+            w.add_page(reader.pages[j])
+        buf = io.BytesIO()
+        w.write(buf)
+        return buf.tell()
+
+    parts, current, oversize = [], [], []
+    for i in range(total):
+        if current and measure(current + [i]) > max_bytes:
+            parts.append(current)
+            current = [i]
+        else:
+            current.append(i)
+        if len(current) == 1 and measure([i]) > max_bytes:
+            oversize.append(i + 1)
+    if current:
+        parts.append(current)
+
+    os.makedirs(dest_folder, exist_ok=True)
+    results, pw = [], max(2, len(str(len(parts))))
+    for idx, pages in enumerate(parts, 1):
+        writer = PdfWriter()
+        for j in pages:
+            writer.add_page(reader.pages[j])
+        fname = _unique_name(dest_folder, f"{base} (parte {str(idx).zfill(pw)}).pdf")
+        full = os.path.join(dest_folder, fname)
+        with open(full, "wb") as f:
+            writer.write(f)
+        results.append({"name": fname, "pages": f"{pages[0] + 1}-{pages[-1] + 1}",
+                        "count": len(pages), "size": os.path.getsize(full)})
+    return {"ok": True, "results": results, "dest": dest_folder,
+            "parts": len(parts), "oversize": sorted(set(oversize))}
+
+
+# ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
 
