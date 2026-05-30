@@ -616,6 +616,57 @@ def outline_to_txt(bookmarks):
     return "\n".join(lines) + "\n"
 
 
+GS_PRESETS = {"max": "/screen", "balance": "/ebook", "high": "/printer"}
+
+
+def resolve_ghostscript():
+    """Retorna o caminho do executavel do Ghostscript, ou None se nao achar.
+
+    Procura, nesta ordem: pasta embutida no .exe (_MEIPASS/gs/), copia
+    vendorizada ao lado do script (./gs/), e por fim o PATH do sistema.
+    """
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates += [os.path.join(base, "gs", "gswin64c.exe"),
+                       os.path.join(base, "gs", "gswin32c.exe")]
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates += [os.path.join(here, "gs", "gswin64c.exe"),
+                   os.path.join(here, "gs", "gswin32c.exe")]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    for name in ("gswin64c", "gswin32c", "gs"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def pdf_compress(src, out, quality="balance"):
+    """Comprime `src` em `out` via Ghostscript. quality: max | balance | high."""
+    if not src or not os.path.isfile(src):
+        raise ValueError("PDF nao encontrado.")
+    gs = resolve_ghostscript()
+    if not gs:
+        raise ValueError("Ghostscript nao encontrado. (Necessario para comprimir.)")
+    preset = GS_PRESETS.get(quality, "/ebook")
+    before = os.path.getsize(src)
+    tmp = out + ".tmp"
+    cmd = [gs, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+           f"-dPDFSETTINGS={preset}", "-dNOPAUSE", "-dBATCH", "-dQUIET",
+           "-sOutputFile=" + tmp, src]
+    proc = subprocess.run(cmd, capture_output=True,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if proc.returncode != 0 or not os.path.isfile(tmp):
+        detail = proc.stderr.decode("utf-8", "ignore")[:200] if proc.stderr else ""
+        raise ValueError("Falha ao comprimir (Ghostscript). " + detail)
+    os.replace(tmp, out)
+    after = os.path.getsize(out)
+    saved = round((1 - after / before) * 100, 1) if before else 0.0
+    return {"ok": True, "path": out, "before": before, "after": after, "saved_pct": saved}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------

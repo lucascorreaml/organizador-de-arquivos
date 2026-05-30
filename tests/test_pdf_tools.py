@@ -103,3 +103,25 @@ def test_outline_to_txt_indenta_e_pagina():
 def test_outline_to_txt_vazio():
     txt = renomear.outline_to_txt([])
     assert "marcadores" in txt.lower()
+
+
+def test_resolve_ghostscript_retorna_str_ou_none():
+    gs = renomear.resolve_ghostscript()
+    assert gs is None or isinstance(gs, str)
+
+def test_pdf_compress_se_gs_disponivel(pdf_factory, tmp_path):
+    import pytest
+    if not renomear.resolve_ghostscript():
+        pytest.skip("Ghostscript nao encontrado neste ambiente.")
+    src = pdf_factory("src.pdf", 3)
+    out = str(tmp_path / "out.pdf")
+    res = renomear.pdf_compress(src, out, "balance")
+    assert res["ok"] and os.path.isfile(out)
+    assert res["before"] > 0 and res["after"] > 0
+
+def test_pdf_compress_sem_gs_levanta(monkeypatch, pdf_factory, tmp_path):
+    import pytest
+    monkeypatch.setattr(renomear, "resolve_ghostscript", lambda: None)
+    src = pdf_factory("src.pdf", 1)
+    with pytest.raises(ValueError):
+        renomear.pdf_compress(src, str(tmp_path / "o.pdf"), "balance")
