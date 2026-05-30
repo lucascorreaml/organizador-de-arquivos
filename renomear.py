@@ -2659,6 +2659,12 @@ function dvComputePlan(){
 function dvRenderPreview(){
   const wrap=q("dvPreview");
   if(!DV.pdf){wrap.innerHTML="";q("dvCount").textContent="Escolha um PDF para começar.";q("dvSplit").disabled=true;return;}
+  if(dvMode()==="size"){
+    q("dvPreview").innerHTML='<div class="hint">As partes serão calculadas no servidor para ficar abaixo do limite de MB.</div>';
+    q("dvCount").textContent="Dividir por tamanho";
+    q("dvSplit").disabled=false;
+    return;
+  }
   const plan=dvComputePlan();DV._plan=plan;
   if(!plan.length){wrap.innerHTML='<div class="hint">Nada para dividir.</div>';q("dvCount").textContent="0 arquivos";q("dvSplit").disabled=true;return;}
   const bm=dvMode()==="bookmarks",num=bm&&q("dvNum").checked,NW=Math.max(2,String(plan.length).length);
@@ -2730,9 +2736,21 @@ q("dvPick").addEventListener("click",async()=>{
 });
 q("dvDestBtn").addEventListener("click",async()=>{const r=await chooseFolder(DV.dest);if(r.cancelled)return;if(r.error){toast(r.error);return;}DV.dest=r.path;q("dvDest").textContent=r.path;q("dvDest").title=r.path;});
 document.querySelectorAll('input[name=dvMode]').forEach(r=>r.addEventListener("change",()=>{dvBmVis();dvRenderPreview();}));
-["dvEvery","dvParts","dvBase"].forEach(id=>q(id).addEventListener("input",dvRenderPreview));
+["dvEvery","dvParts","dvBase","dvMaxMb"].forEach(id=>q(id).addEventListener("input",dvRenderPreview));
 ["dvLevel","dvNum","dvFront"].forEach(id=>q(id).addEventListener("change",dvRenderPreview));
-q("dvSplit").addEventListener("click",()=>{
+q("dvSplit").addEventListener("click",async()=>{
+  if(dvMode()==="size"){
+    const sub=q("dvSubChk").checked?(q("dvSubName").value||"Dividido").trim():"";
+    q("dvSplit").disabled=true;
+    const r=await api("/api/pdf-split-size",{pdf:DV.pdf,dest:DV.dest,subfolder:sub,
+      max_mb:parseFloat(q("dvMaxMb").value||"10"),base:(q("dvBase").value||DV.name||"").trim()});
+    q("dvSplit").disabled=false;
+    if(!r.ok){toast(r.error||"Falha ao dividir.");return;}
+    let msg="✓ "+r.parts+" arquivo(s) gerado(s).";
+    if(r.oversize&&r.oversize.length)msg+=" (Páginas acima do limite: "+r.oversize.join(", ")+".)";
+    toast(msg);
+    return;
+  }
   const ranges=dvFinalRanges();if(!ranges.length)return;
   const go=async()=>{
     closeModal();
