@@ -1237,6 +1237,94 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._send(200, {"ok": False, "error": str(e)})
 
+            elif self.path == "/api/pdf-split-size":
+                pdf = data.get("pdf", "")
+                dest = data.get("dest", "") or (os.path.dirname(pdf) if pdf else "")
+                sub = (data.get("subfolder") or "").strip()
+                if sub:
+                    ok, reason = validate_name(sub)
+                    if not ok:
+                        self._send(200, {"ok": False, "error": f"Subpasta invalida: {reason}"})
+                        return
+                    dest = os.path.join(dest, sub)
+                try:
+                    self._send(200, pdf_split_by_size(pdf, dest, data.get("max_mb", 10),
+                                                       data.get("base")))
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-rearrange":
+                pdf = data.get("pdf", "")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + " (girado).pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    res = pdf_rearrange(pdf, data.get("ops", []), out)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/images-to-pdf":
+                items = data.get("images", [])
+                out = (data.get("out") or "").strip()
+                mode = data.get("mode", "fit")
+                if not out:
+                    self._send(200, {"ok": False, "error": "Caminho de saida nao informado."})
+                    return
+                if not out.lower().endswith(".pdf"):
+                    out += ".pdf"
+                try:
+                    self._send(200, images_to_pdf(items, out, mode))
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-to-images":
+                pdf = data.get("pdf", "")
+                dest = data.get("dest", "") or (os.path.dirname(pdf) if pdf else "")
+                sub = (data.get("subfolder") or "Imagens").strip()
+                if sub:
+                    ok, reason = validate_name(sub)
+                    if not ok:
+                        self._send(200, {"ok": False, "error": f"Subpasta invalida: {reason}"})
+                        return
+                    dest = os.path.join(dest, sub)
+                try:
+                    self._send(200, pdf_to_images(pdf, dest, data.get("fmt", "png"),
+                                                  data.get("dpi", 150)))
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-password":
+                pdf = data.get("pdf", "")
+                mode = data.get("mode", "protect")
+                password = data.get("password", "")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    suffix = " (protegido)" if mode == "protect" else " (sem senha)"
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + suffix + ".pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    if mode == "remove":
+                        res = pdf_remove_password(pdf, out, password)
+                    else:
+                        res = pdf_set_password(pdf, out, password)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
                     self._send(200, {"ok": False, "error": "Nada para desfazer."})
