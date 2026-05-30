@@ -1793,18 +1793,9 @@ function sortItems(items,mode){
   });
   return arr;
 }
-function attachSort(barEl,getItems,setItems,reRender){
-  if(!barEl) return;
-  barEl.querySelectorAll(".sortbtn").forEach(btn=>btn.addEventListener("click",()=>{
-    const mode=btn.dataset.sort;
-    barEl.querySelectorAll(".sortbtn").forEach(b=>b.classList.toggle("on",b===btn));
-    setItems(sortItems(getItems(),mode));
-    reRender();
-  }));
-}
 
 let canUndo=false;
-function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
+function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo","dpUndo","cpUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
 
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
@@ -2574,7 +2565,8 @@ q("mgGo").addEventListener("click",async()=>{
   const mode=(document.querySelector('input[name=mgBm]:checked')||{}).value||"file";
   let name=(q("mgName").value||"Juntado.pdf").trim();
   const firstReal=MG.list.find(it=>!/renomear_up_/.test(it.path));
-  const folder=firstReal?firstReal.path.replace(/[\\/][^\\/]+$/,""):"";
+  const baseItem=firstReal||MG.list[0];
+  const folder=baseItem?baseItem.path.replace(/[\\/][^\\/]+$/,""):"";
   const out=(folder?folder+"\\":"")+name;
   q("mgGo").disabled=true;q("mgGo").textContent="Juntando…";
   const items=MG.list.map(it=>({path:it.path,title:it.name.replace(/\.pdf$/i,""),group:it.group}));
