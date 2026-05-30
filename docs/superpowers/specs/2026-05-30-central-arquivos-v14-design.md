@@ -104,7 +104,10 @@ Desfazer (`UNDO_STACK`): incluir o caso de sobrescrever original (excluir págin
 
 ## UI / organização das abas
 
-- Total passa a ~13 abas. Agrupar a barra em **2 linhas**: *Pastas & Arquivos* | *Ferramentas de PDF*, mantendo o estilo de links sublinhados separados por `|`. Sem mudar cores/tipografia.
+- **Uma linha só, uma aba por ferramenta** (padrão atual: links sublinhados separados por `|`). Sem agrupar em duas linhas. Sem mudar cores/tipografia.
+- Ordem confirmada (novas em **negrito**):
+  `Renomear` | `Renomear em lote` | `Colar do Excel` | `Criar` | `Organizar` | `Exportar lista` | `Extrair Páginas` | **`Excluir Páginas`** | `Dividir PDF` | **`Juntar PDF`** | **`Comprimir PDF`** | `Marcadores` | `Comparar Arquivos`
+- Ordenação A-Z e Arrastar PDF **não** viram abas (entram nas abas existentes); Exportar marcadores .txt é só um botão dentro de `Marcadores`.
 - Áreas de arrastar: borda tracejada fina (1px), texto em itálico cinza (`#555`), seguindo a paleta atual.
 - Botões novos reutilizam classes existentes (`.btn-primary`, `.btn-link`, `.toolbar`, `.box`).
 
