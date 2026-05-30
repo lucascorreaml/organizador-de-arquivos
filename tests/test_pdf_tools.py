@@ -206,3 +206,33 @@ def test_pdf_rearrange_vazio(pdf_factory, tmp_path):
     src = pdf_factory("s.pdf", 2)
     with pytest.raises(ValueError):
         renomear.pdf_rearrange(src, [], str(tmp_path / "o.pdf"))
+
+
+def _img(path, w, h, color=(200, 100, 50)):
+    from PIL import Image
+    Image.new("RGB", (w, h), color).save(path)
+    return path
+
+def test_images_to_pdf_fit(tmp_path):
+    a = _img(str(tmp_path / "a.png"), 100, 60)
+    b = _img(str(tmp_path / "b.png"), 80, 120)
+    out = str(tmp_path / "o.pdf")
+    res = renomear.images_to_pdf([a, b], out, "fit")
+    from pypdf import PdfReader
+    r = PdfReader(out)
+    assert res["ok"] and res["pages"] == 2 and len(r.pages) == 2
+    assert abs(float(r.pages[0].mediabox.width) - 100) < 2
+    assert abs(float(r.pages[0].mediabox.height) - 60) < 2
+
+def test_images_to_pdf_a4(tmp_path):
+    a = _img(str(tmp_path / "a.png"), 100, 60)
+    out = str(tmp_path / "o.pdf")
+    renomear.images_to_pdf([a], out, "a4")
+    from pypdf import PdfReader
+    p = PdfReader(out).pages[0]
+    assert abs(float(p.mediabox.width) - 595) < 2 and abs(float(p.mediabox.height) - 842) < 2
+
+def test_images_to_pdf_vazio(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        renomear.images_to_pdf([], str(tmp_path / "o.pdf"), "fit")

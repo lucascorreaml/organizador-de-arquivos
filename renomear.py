@@ -807,6 +807,33 @@ def pdf_rearrange(pdf_path, ops, out):
     return {"ok": True, "path": out, "pages": len(writer.pages)}
 
 
+def images_to_pdf(image_paths, out, page_mode="fit"):
+    """Gera um PDF (1 imagem por pagina). page_mode: 'fit' (pagina = tamanho da
+    imagem) ou 'a4' (imagem centralizada numa pagina A4 retrato)."""
+    if not image_paths:
+        raise ValueError("Nenhuma imagem informada.")
+    from PIL import Image
+    pages = []
+    for p in image_paths:
+        if not p or not os.path.isfile(p):
+            raise ValueError(f"Imagem nao encontrada: {p}")
+        img = Image.open(p).convert("RGB")
+        if page_mode == "a4":
+            a4 = (595, 842)
+            canvas = Image.new("RGB", a4, "white")
+            iw, ih = img.size
+            scale = min(a4[0] / iw, a4[1] / ih)
+            nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+            canvas.paste(img.resize((nw, nh)), ((a4[0] - nw) // 2, (a4[1] - nh) // 2))
+            pages.append(canvas)
+        else:
+            pages.append(img)
+    tmp = out + ".tmp"
+    pages[0].save(tmp, "PDF", resolution=72.0, save_all=True, append_images=pages[1:])
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "pages": len(pages)}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
