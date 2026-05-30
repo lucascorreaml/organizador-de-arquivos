@@ -3059,6 +3059,55 @@ q("cpGo").addEventListener("click",async()=>{
 });
 
 // ===================================================================
+//  GIRAR E REORDENAR
+// ===================================================================
+const PO={pdf:null,name:"",fromUpload:false,items:[]}; // items: {src, rotate}
+function poUpd(){
+  q("poGo").disabled=!(PO.pdf&&PO.items.length);
+  const ov=q("poOver");if(ov)ov.disabled=PO.fromUpload;
+  q("poUndo").disabled=!canUndo;
+}
+function poRender(){
+  const box=q("poList");
+  if(!PO.items.length){box.innerHTML=\'<div class="empty">Nenhuma página.</div>\';poUpd();return;}
+  box.innerHTML=PO.items.map((it,i)=>(
+    \'<div class="mglist-row">\'
+    +\'<span class="nm">Página \'+(it.src+1)+\' <span class="pg">(giro: \'+it.rotate+\'°)</span></span>\'
+    +\'<button class="btn-link" data-up="\'+i+\'" \'+(i===0?\'disabled\':\'\')+\'>↑</button>\'
+    +\'<button class="btn-link" data-down="\'+i+\'" \'+(i===PO.items.length-1?\'disabled\':\'\')+\'>↓</button>\'
+    +\'<button class="btn-link" data-rot="\'+i+\'">↻ girar</button>\'
+    +\'</div>\')).join("");
+  box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[PO.items[i-1],PO.items[i]]=[PO.items[i],PO.items[i-1]];poRender();}));
+  box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[PO.items[i+1],PO.items[i]]=[PO.items[i],PO.items[i+1]];poRender();}));
+  box.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.rot;PO.items[i].rotate=(PO.items[i].rotate+90)%360;poRender();}));
+  poUpd();
+}
+async function poLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  PO.pdf=path;PO.name=r.name;PO.fromUpload=!!fromUpload;
+  PO.items=Array.from({length:r.pages},(_,i)=>({src:i,rotate:0}));
+  q("poPath").textContent=r.name+" ("+r.pages+" páginas)";q("poPath").title=path;
+  q("poCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector(\'input[name=poMode][value=new]\');if(m)m.checked=true;}
+  poRender();
+}
+q("poPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;poLoad(r.path,baseName(r.path),false);});
+makeDrop(q("poDrop"),(p,n)=>poLoad(p,n,true));
+q("poUndo").addEventListener("click",undoLast);
+q("poGo").addEventListener("click",async()=>{
+  const overwrite=(document.querySelector(\'input[name=poMode]:checked\')||{}).value==="over" && !PO.fromUpload;
+  q("poGo").disabled=true;q("poGo").textContent="Aplicando…";
+  const r=await api("/api/pdf-rearrange",{pdf:PO.pdf,ops:PO.items,overwrite});
+  q("poGo").textContent="Aplicar";
+  if(!r.ok){toast(r.error||"Falha.");poUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("poResult").innerHTML=\'<p class="hint">✓ PDF gerado (\'+r.pages+\' páginas). \'
+    +(PO.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+\'</p>\';
+  poUpd();
+});
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
