@@ -1323,6 +1323,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="rnPick">Escolher pasta</button>
       <button id="rnUp" disabled>Subir</button>
       <button id="rnReload" disabled>Recarregar</button>
+      <span class="sortctl" id="rnSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
       <button id="rnPaste" disabled>Colar nomes</button>
       <button id="rnClear" disabled>Limpar</button>
     </div>
@@ -1351,6 +1352,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="btPick">Escolher pasta</button>
       <span class="pathbox" id="btPath">Nenhuma pasta selecionada</span>
       <button id="btReload" disabled>Recarregar</button>
+      <span class="sortctl" id="btSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
     </div>
     <div class="box">
       <div class="row2">
@@ -1405,6 +1407,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button class="btn-primary" id="xlPick">Escolher pasta</button>
       <span class="pathbox" id="xlPath">Nenhuma pasta selecionada</span>
       <button id="xlReload" disabled>Recarregar</button>
+      <span class="sortctl" id="xlSort">Ordem: <button class="sortbtn on" data-sort="natural">Natural</button><button class="sortbtn" data-sort="az">A-Z</button><button class="sortbtn" data-sort="za">Z-A</button></span>
       <button id="xlCopy" disabled>Copiar nomes atuais</button>
     </div>
     <div class="field">
@@ -1811,7 +1814,7 @@ document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
 // ===================================================================
 //  RENOMEAR (manual) + PRE-VISUALIZACAO
 // ===================================================================
-const RN={root:null,current:null,parent:null,items:[],sel:-1};
+const RN={root:null,current:null,parent:null,items:[],sel:-1,sortMode:'natural'};
 function rnCrumbsArr(){
   const c=[{name:baseName(RN.root)||RN.root,path:RN.root}];
   if(RN.current.length>RN.root.length && RN.current.toLowerCase().startsWith(RN.root.toLowerCase())){
@@ -1889,7 +1892,7 @@ function rnUpd(){
   q("rnClear").disabled=!RN.items.length;q("rnReload").disabled=!RN.current;q("rnPaste").disabled=!RN.items.length;
   q("rnUp").disabled=!RN.current||sameLower(RN.current,RN.root);q("rnUndo").disabled=!canUndo;
 }
-function rnAll(){rnRenderCrumbs();rnRender();rnUpd();}
+function rnAll(){RN.items=sortItems(RN.items,RN.sortMode||'natural');rnRenderCrumbs();rnRender();rnUpd();}
 function rnHasPending(){return rnPending().n>0;}
 function rnNav(path){if(rnHasPending())confirmModal("Sair desta pasta?","Você digitou nomes que ainda não foram aplicados. Eles serão descartados.","Sair sem aplicar",()=>rnDo(path));else rnDo(path);}
 async function rnDo(path){closeModal();const r=await api("/api/list",{path});if(r.error){toast(r.error);return;}RN.current=r.path;RN.parent=r.parent;RN.items=r.items;rnAll();}
@@ -1910,11 +1913,12 @@ q("rnPreview").addEventListener("click",async()=>{const r=await api("/api/valida
 q("rnRename").addEventListener("click",async()=>{const r=await api("/api/validate",{folder:RN.current,renames:rnCollect()});showPreview(r,true,rnApply);});
 async function rnApply(){const r=await api("/api/rename",{folder:RN.current,renames:rnCollect()});closeModal();if(!r.ok){toast(r.error||"Falha ao renomear.");return;}setCanUndo(!!r.can_undo);RN.current=r.path;RN.parent=r.parent;RN.items=r.items;rnAll();toast(r.renamed+" renomeado(s).");}
 q("rnUndo").addEventListener("click",undoLast);
+q("rnSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{RN.sortMode=b.dataset.sort;RN.items=sortItems(RN.items,RN.sortMode);rnRenderCrumbs();rnRender();rnUpd();q("rnSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 
 // ===================================================================
 //  RENOMEAR EM LOTE
 // ===================================================================
-const BT={folder:null,items:[]};
+const BT={folder:null,items:[],sortMode:'natural'};
 function noAccents(s){return s.normalize("NFD").replace(/[̀-ͯ]/g,"");}
 function applyCase(s,mode){
   if(mode==="upper")return s.toUpperCase();
@@ -1951,6 +1955,7 @@ function btCompute(){
   return rows;
 }
 function btRender(){
+  BT.items=sortItems(BT.items,BT.sortMode||'natural');
   const area=q("btTable");
   if(!BT.items.length){area.innerHTML='<div class="empty">Escolha uma pasta para ver a prévia.</div>';q("btCount").textContent="—";q("btApply").disabled=true;return;}
   const rows=btCompute();let html="";
@@ -1985,6 +1990,7 @@ q("btApply").addEventListener("click",()=>{
     setCanUndo(!!r.can_undo);BT.items=r.items;btRender();toast(r.renamed+" renomeado(s).");});
 });
 q("btUndo").addEventListener("click",undoLast);
+q("btSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{BT.sortMode=b.dataset.sort;btRender();q("btSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 
 // ===================================================================
 //  CRIAR
@@ -2058,9 +2064,10 @@ q("exGen").addEventListener("click",async()=>{
 // ===================================================================
 //  COLAR DO EXCEL
 // ===================================================================
-const XL={folder:null,items:[],filtered:[]};
+const XL={folder:null,items:[],filtered:[],sortMode:'natural'};
 function xlScope(){return (document.querySelector('input[name=xlScope]:checked')||{}).value||"all";}
 function xlBuild(){
+  XL.items=sortItems(XL.items,XL.sortMode||'natural');
   const sc=xlScope();
   XL.filtered=XL.items.filter(it=>sc==="all"||(sc==="files"&&!it.is_dir)||(sc==="dirs"&&it.is_dir));
   q("xlCurrent").value=XL.filtered.map(it=>it.name).join("\n");
@@ -2090,6 +2097,7 @@ q("xlCopy").addEventListener("click",()=>{const txt=XL.filtered.map(it=>it.name)
 q("xlRename").addEventListener("click",async()=>{const r=await api("/api/validate",{folder:XL.folder,renames:xlRenames()});showPreview(r,true,xlApply);});
 async function xlApply(){const r=await api("/api/rename",{folder:XL.folder,renames:xlRenames()});closeModal();if(!r.ok){toast(r.error||"Falha ao renomear.");return;}setCanUndo(!!r.can_undo);XL.items=r.items;q("xlNew").value="";xlBuild();toast(r.renamed+" renomeado(s).");}
 q("xlUndo").addEventListener("click",undoLast);
+q("xlSort").querySelectorAll(".sortbtn").forEach(b=>b.addEventListener("click",()=>{XL.sortMode=b.dataset.sort;xlBuild();q("xlSort").querySelectorAll(".sortbtn").forEach(x=>x.classList.toggle("on",x===b));}));
 // sincroniza rolagem das duas colunas
 ["xlCurrent","xlNew"].forEach((a,i)=>{const b=["xlCurrent","xlNew"][1-i];q(a).addEventListener("scroll",()=>{const o=q(b);if(o.scrollTop!==q(a).scrollTop)o.scrollTop=q(a).scrollTop;});});
 
