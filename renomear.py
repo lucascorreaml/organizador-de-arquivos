@@ -1224,6 +1224,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .row2{display:flex;gap:18px;flex-wrap:wrap}
   .row2>div{flex:1;min-width:210px}
   .box{background:#f6f6f6;padding:12px 14px;margin:11px 0}
+  .drop{border:1px dashed #999;padding:14px;margin:10px 0;text-align:center;font-style:italic;color:#555;cursor:default}
+  .drop.dragover{border-color:#000;background:#f0f0f0;color:#000}
+  .sortctl{font-size:13.5px;margin-left:8px}
+  .sortbtn{font-size:13px;padding:2px 7px;margin-left:3px}
+  .sortbtn.on{font-weight:bold;background:#eee}
+  .mglist-row{display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid #eee}
+  .mglist-row .nm{flex:1;min-width:0;word-break:break-word}
+  .mglist-row .pg{font-style:italic;font-size:13px;color:#555}
 
   .actionbar{margin-top:12px}
   .actionbar button{margin-left:5px;margin-bottom:4px}
@@ -1300,7 +1308,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="organize">Organizar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="export">Exportar lista</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="pdf">Extrair Páginas</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="delpages">Excluir Páginas</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="divide">Dividir PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="merge">Juntar PDF</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="compress">Comprimir PDF</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="marks">Marcadores</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="compare">Comparar Arquivos</button>
   </p>
@@ -1603,6 +1614,91 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="preview-box" id="mkPrev"><i>Escolha um PDF para visualizar aqui.</i></div>
       </div>
     </div>
+  </section>
+
+  <!-- ===== EXCLUIR PAGINAS ===== -->
+  <section class="panel" id="panel-delpages">
+    <div class="toolbar">
+      <button class="btn-primary" id="dpPick">Escolher PDF</button>
+      <span class="pathbox" id="dpPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="dpDrop">Arraste um PDF aqui</div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Páginas a excluir</span>
+        <input type="text" id="dpPages" placeholder="ex.: 1, 3, 5-8, 12">
+        <p class="hint" id="dpInfo"></p>
+      </div>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="dpMode" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="dpMode" value="over" id="dpOver"> Sobrescrever o original</label>
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="dpCount">Escolha um PDF.</span>
+      <button id="dpUndo" disabled>Desfazer</button>
+      <button id="dpGo" disabled class="btn-primary">Excluir páginas</button>
+    </div>
+    <div id="dpResult"></div>
+  </section>
+
+  <!-- ===== JUNTAR PDF ===== -->
+  <section class="panel" id="panel-merge">
+    <div class="toolbar">
+      <button class="btn-primary" id="mgAdd">Adicionar PDF(s)</button>
+      <button id="mgClear" disabled>Limpar lista</button>
+    </div>
+    <div class="drop" id="mgDrop">Arraste um ou mais PDFs aqui</div>
+    <div id="mgList"></div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Marcadores</span>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="mgBm" value="file" checked> Um marcador por arquivo</label>
+          <label class="opt"><input type="radio" name="mgBm" value="folder"> Agrupar por pasta de origem</label>
+          <label class="opt"><input type="radio" name="mgBm" value="none"> Sem marcadores</label>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Nome do arquivo final</span>
+        <input type="text" id="mgName" value="Juntado.pdf" style="width:60%">
+      </div>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="mgCount">Adicione ao menos 2 PDFs.</span>
+      <button id="mgGo" disabled class="btn-primary">Juntar PDF</button>
+    </div>
+    <div id="mgResult"></div>
+  </section>
+
+  <!-- ===== COMPRIMIR PDF ===== -->
+  <section class="panel" id="panel-compress">
+    <div class="toolbar">
+      <button class="btn-primary" id="cpPick">Escolher PDF</button>
+      <span class="pathbox" id="cpPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="cpDrop">Arraste um PDF aqui</div>
+    <div class="box">
+      <div class="field">
+        <span class="lbl">Qualidade / compressão</span>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="cpQ" value="max"> Máxima compressão (~72 dpi)</label>
+          <label class="opt"><input type="radio" name="cpQ" value="balance" checked> Equilíbrio (~150 dpi)</label>
+          <label class="opt"><input type="radio" name="cpQ" value="high"> Alta qualidade (~300 dpi)</label>
+        </div>
+      </div>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="cpMode" value="new" checked> Salvar como novo arquivo</label>
+        <label class="opt"><input type="radio" name="cpMode" value="over"> Sobrescrever o original</label>
+      </div>
+      <p class="hint" id="cpGsWarn" style="display:none"><b>Ghostscript não encontrado</b> — a compressão ficará indisponível.</p>
+    </div>
+    <div class="actionbar">
+      <span class="count" id="cpCount">Escolha um PDF.</span>
+      <button id="cpUndo" disabled>Desfazer</button>
+      <button id="cpGo" disabled class="btn-primary">Comprimir</button>
+    </div>
+    <div id="cpResult"></div>
   </section>
 
   <!-- ===== COMPARAR ARQUIVOS ===== -->
