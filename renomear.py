@@ -2576,6 +2576,44 @@ q("mgGo").addEventListener("click",async()=>{
 mgRender();
 
 // ===================================================================
+//  COMPRIMIR PDF
+// ===================================================================
+const CP={pdf:null,name:"",fromUpload:false,gsOk:true};
+function fmtKB(n){return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";}
+function cpUpd(){
+  q("cpGo").disabled=!(CP.pdf&&CP.gsOk);
+  const over=document.querySelector('input[name=cpMode][value=over]');if(over)over.disabled=CP.fromUpload;
+  q("cpUndo").disabled=!canUndo;
+}
+async function cpLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  CP.pdf=path;CP.name=r.name;CP.fromUpload=!!fromUpload;
+  q("cpPath").textContent=r.name;q("cpPath").title=path;q("cpCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector('input[name=cpMode][value=new]');if(m)m.checked=true;}
+  cpUpd();
+}
+(async()=>{const g=await api("/api/gs-check",{});CP.gsOk=!!g.available;if(!g.available)q("cpGsWarn").style.display="";cpUpd();})();
+q("cpPick").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;cpLoad(r.path,baseName(r.path),false);
+});
+makeDrop(q("cpDrop"),(p,n)=>cpLoad(p,n,true));
+q("cpUndo").addEventListener("click",undoLast);
+q("cpGo").addEventListener("click",async()=>{
+  const quality=(document.querySelector('input[name=cpQ]:checked')||{}).value||"balance";
+  const overwrite=(document.querySelector('input[name=cpMode]:checked')||{}).value==="over" && !CP.fromUpload;
+  q("cpGo").disabled=true;q("cpGo").textContent="Comprimindo…";
+  const r=await api("/api/pdf-compress",{pdf:CP.pdf,quality,overwrite});
+  q("cpGo").textContent="Comprimir";
+  if(!r.ok){toast(r.error||"Falha ao comprimir.");cpUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("cpResult").innerHTML='<p class="hint">✓ '+fmtKB(r.before)+' → <b>'+fmtKB(r.after)+'</b> (−'+r.saved_pct+'%). '
+    +(CP.fromUpload?downloadLink(r.path,"baixar PDF comprimido"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
+  cpUpd();
+});
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
