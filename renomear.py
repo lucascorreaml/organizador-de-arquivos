@@ -495,6 +495,45 @@ def pdf_save_outline(pdf_path, out_path, items):
 
 
 # ----------------------------------------------------------------------------
+# Paginas: excluir / juntar / comprimir / marcadores em txt
+# ----------------------------------------------------------------------------
+
+def parse_page_spec(spec, total):
+    """Converte '1,3,5-8' em um conjunto de paginas 1-based validas (1..total).
+
+    Aceita virgula ou ponto-e-virgula como separador e faixas 'a-b' (em
+    qualquer ordem). Levanta ValueError em entrada invalida ou fora do intervalo.
+    """
+    if total <= 0:
+        raise ValueError("PDF sem paginas.")
+    pages = set()
+    for tok in (spec or "").replace(";", ",").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "-" in tok:
+            a, _, b = tok.partition("-")
+            try:
+                start, end = int(a.strip()), int(b.strip())
+            except ValueError:
+                raise ValueError(f'Trecho invalido: "{tok}".')
+            if start > end:
+                start, end = end, start
+            pages.update(range(start, end + 1))
+        else:
+            try:
+                pages.add(int(tok))
+            except ValueError:
+                raise ValueError(f'Numero invalido: "{tok}".')
+    if not pages:
+        raise ValueError("Nenhuma pagina informada.")
+    bad = sorted(p for p in pages if p < 1 or p > total)
+    if bad:
+        raise ValueError(f"Fora do intervalo 1..{total}: {', '.join(map(str, bad))}.")
+    return pages
+
+
+# ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
 
