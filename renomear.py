@@ -2523,6 +2523,59 @@ q("dpGo").addEventListener("click",async()=>{
 });
 
 // ===================================================================
+//  JUNTAR PDF
+// ===================================================================
+const MG={list:[]}; // cada item: {path,name,pages,group}
+function mgRender(){
+  const box=q("mgList");
+  if(!MG.list.length){box.innerHTML='<div class="empty">Nenhum PDF na lista.</div>';mgUpd();return;}
+  box.innerHTML=MG.list.map((it,i)=>(
+    '<div class="mglist-row">'
+    +'<span class="pg">#'+(i+1)+'</span>'
+    +'<span class="nm">'+esc(it.name)+' <span class="pg">('+it.pages+' pág.)</span></span>'
+    +'<button class="btn-link" data-up="'+i+'" '+(i===0?'disabled':'')+'>↑</button>'
+    +'<button class="btn-link" data-down="'+i+'" '+(i===MG.list.length-1?'disabled':'')+'>↓</button>'
+    +'<button class="btn-link" data-del="'+i+'">remover</button>'
+    +'</div>')).join("");
+  box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[MG.list[i-1],MG.list[i]]=[MG.list[i],MG.list[i-1]];mgRender();}));
+  box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[MG.list[i+1],MG.list[i]]=[MG.list[i],MG.list[i+1]];mgRender();}));
+  box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{MG.list.splice(+b.dataset.del,1);mgRender();}));
+  mgUpd();
+}
+function mgUpd(){
+  q("mgGo").disabled=MG.list.length<2;
+  q("mgClear").disabled=!MG.list.length;
+  q("mgCount").textContent=MG.list.length?(MG.list.length+" PDF(s) na lista."):"Adicione ao menos 2 PDFs.";
+}
+async function mgAddPath(path,name){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido: "+name);return;}
+  MG.list.push({path,name:r.name,pages:r.pages,group:""});
+  mgRender();
+}
+q("mgAdd").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;await mgAddPath(r.path,baseName(r.path));
+});
+makeDrop(q("mgDrop"),(p,n)=>mgAddPath(p,n));
+q("mgClear").addEventListener("click",()=>{MG.list=[];mgRender();});
+q("mgGo").addEventListener("click",async()=>{
+  const mode=(document.querySelector('input[name=mgBm]:checked')||{}).value||"file";
+  let name=(q("mgName").value||"Juntado.pdf").trim();
+  const firstReal=MG.list.find(it=>!/renomear_up_/.test(it.path));
+  const folder=firstReal?firstReal.path.replace(/[\\/][^\\/]+$/,""):"";
+  const out=(folder?folder+"\\":"")+name;
+  q("mgGo").disabled=true;q("mgGo").textContent="Juntando…";
+  const items=MG.list.map(it=>({path:it.path,title:it.name.replace(/\.pdf$/i,""),group:it.group}));
+  const r=await api("/api/pdf-merge",{items,out:out,mode});
+  q("mgGo").textContent="Juntar PDF";mgUpd();
+  if(!r.ok){toast(r.error||"Falha ao juntar.");return;}
+  q("mgResult").innerHTML='<p class="hint">✓ '+r.files+' PDF(s) juntos, '+r.pages+' página(s). '
+    +(firstReal?"Salvo em: "+esc(baseName(r.path)):downloadLink(r.path,"baixar PDF juntado"))+'</p>';
+});
+mgRender();
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
