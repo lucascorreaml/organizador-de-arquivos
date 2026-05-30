@@ -58,6 +58,13 @@ O app roda **localmente** na sua máquina e só acessa as pastas que você escol
 - Interface em **HTML/CSS/JS** embutida, servida localmente em `127.0.0.1`.
 - Empacotado como `.exe` com **PyInstaller** (a pypdf vai junto, embutida).
 
+## 🆕 Novidades v1.5
+
+- **Dividir por tamanho (MB)** — novo modo na aba "Dividir PDF": gera partes abaixo de um limite de MB (útil p/ limites de upload).
+- **Girar e Reordenar** — gira páginas (90°) e muda a ordem das páginas de um PDF.
+- **Imagens ⇄ PDF** — junta imagens (JPG/PNG…) num PDF (ajustar à imagem ou A4) e exporta páginas de PDF como imagens (PNG/JPG, 96/150/300 dpi).
+- **Senha** — protege com senha ou remove a senha de um PDF.
+
 ## 🆕 Novidades v1.4
 
 - **Excluir Páginas** — remove páginas específicas de um PDF (ex.: `1, 3, 5-8`); salva como novo arquivo ou sobrescreve o original (com desfazer).

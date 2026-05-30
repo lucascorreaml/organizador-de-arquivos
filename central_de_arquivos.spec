@@ -9,7 +9,7 @@ a = Analysis(
         ('gs/gsdll64.dll', 'gs'),
     ],
     datas=[],
-    hiddenimports=['pypdf'],
+    hiddenimports=['pypdf', 'PIL'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
