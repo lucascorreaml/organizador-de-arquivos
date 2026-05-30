@@ -88,3 +88,18 @@ def test_pdf_merge_vazio(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         renomear.pdf_merge([], str(tmp_path / "x.pdf"), "file")
+
+
+def test_outline_to_txt_indenta_e_pagina():
+    bms = [{"title": "Cap 1", "depth": 1, "page": 1},
+           {"title": "1.1", "depth": 2, "page": 3},
+           {"title": "Cap 2", "depth": 1, "page": 20}]
+    txt = renomear.outline_to_txt(bms)
+    linhas = txt.splitlines()
+    assert linhas[0] == "Cap 1  (p.1)"
+    assert linhas[1] == "  1.1  (p.3)"
+    assert linhas[2] == "Cap 2  (p.20)"
+
+def test_outline_to_txt_vazio():
+    txt = renomear.outline_to_txt([])
+    assert "marcadores" in txt.lower()

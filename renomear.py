@@ -599,6 +599,23 @@ def pdf_merge(items, out, bookmark_mode="file"):
     return {"ok": True, "path": out, "files": files, "pages": len(writer.pages)}
 
 
+def outline_to_txt(bookmarks):
+    """Formata a lista plana de marcadores (de pdf_outline) como texto indentado."""
+    if not bookmarks:
+        return "(Este PDF nao tem marcadores.)\n"
+    lines = []
+    for b in bookmarks:
+        try:
+            depth = max(1, int(b.get("depth", 1)))
+        except (TypeError, ValueError):
+            depth = 1
+        title = str(b.get("title", "")).strip() or "(sem titulo)"
+        page = b.get("page")
+        indent = "  " * (depth - 1)
+        lines.append(f"{indent}{title}  (p.{page})" if page else f"{indent}{title}")
+    return "\n".join(lines) + "\n"
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
