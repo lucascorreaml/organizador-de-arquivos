@@ -2219,7 +2219,7 @@ function sortItems(items,mode){
 }
 
 let canUndo=false;
-function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo","dpUndo","cpUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
+function setCanUndo(v){canUndo=v;["rnUndo","btUndo","xlUndo","crUndo","ogUndo","dpUndo","cpUndo","poUndo","pwUndo"].forEach(id=>{const b=q(id);if(b)b.disabled=!v;});}
 
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
@@ -3146,7 +3146,7 @@ q("ipI2PGo").addEventListener("click",async()=>{
   const firstReal=IP.imgs.find(it=>!/renomear_up_/.test(it.path));
   const baseItem=firstReal||IP.imgs[0];
   const folder=baseItem?baseItem.path.replace(/[\\/][^\\/]+$/,""):"";
-  const out=(folder?folder+"\\\\":"")+name;
+  const out=(folder?folder+"\\":"")+name;
   q("ipI2PGo").disabled=true;q("ipI2PGo").textContent="Gerando…";
   const r=await api("/api/images-to-pdf",{images:IP.imgs.map(it=>it.path),out,mode});
   q("ipI2PGo").textContent="Gerar PDF";ipUpd();
