@@ -770,6 +770,43 @@ def pdf_split_by_size(pdf_path, dest_folder, max_mb, base_name=None):
             "parts": len(parts), "oversize": sorted(set(oversize))}
 
 
+def pdf_rearrange(pdf_path, ops, out):
+    """Gera `out` com as paginas na ordem/rotacao de `ops`.
+
+    ops: lista de {"src": indice 0-based, "rotate": graus (multiplo de 90)}.
+    """
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    if not ops:
+        raise ValueError("Nenhuma pagina informada.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(pdf_path, strict=False)
+    total = len(reader.pages)
+    writer = PdfWriter()
+    for op in ops:
+        try:
+            src = int(op.get("src"))
+        except (TypeError, ValueError):
+            raise ValueError("Indice de pagina invalido.")
+        if src < 0 or src >= total:
+            raise ValueError(f"Pagina fora do intervalo: {src + 1}.")
+        try:
+            rot = int(op.get("rotate", 0)) % 360
+        except (TypeError, ValueError):
+            rot = 0
+        if rot % 90 != 0:
+            raise ValueError("Rotacao deve ser multiplo de 90.")
+        page = reader.pages[src]
+        if rot:
+            page = page.rotate(rot)
+        writer.add_page(page)
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "pages": len(writer.pages)}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------

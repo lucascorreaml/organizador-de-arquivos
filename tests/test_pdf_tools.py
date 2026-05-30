@@ -182,3 +182,27 @@ def test_split_by_size_invalido(pdf_factory, tmp_path):
     src = pdf_factory("s.pdf", 2)
     with pytest.raises(ValueError):
         renomear.pdf_split_by_size(src, str(tmp_path / "o"), 0)
+
+
+def test_pdf_rearrange_ordem_e_rotacao(pdf_factory, tmp_path):
+    src = pdf_factory("s.pdf", 3)
+    out = str(tmp_path / "o.pdf")
+    ops = [{"src": 2, "rotate": 90}, {"src": 0, "rotate": 180}, {"src": 1, "rotate": 0}]
+    res = renomear.pdf_rearrange(src, ops, out)
+    from pypdf import PdfReader
+    r = PdfReader(out)
+    assert res["pages"] == 3 and len(r.pages) == 3
+    rots = [int(p.get("/Rotate") or 0) for p in r.pages]
+    assert rots == [90, 180, 0]
+
+def test_pdf_rearrange_indice_fora(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 2)
+    with pytest.raises(ValueError):
+        renomear.pdf_rearrange(src, [{"src": 9, "rotate": 0}], str(tmp_path / "o.pdf"))
+
+def test_pdf_rearrange_vazio(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 2)
+    with pytest.raises(ValueError):
+        renomear.pdf_rearrange(src, [], str(tmp_path / "o.pdf"))
