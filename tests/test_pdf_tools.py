@@ -128,12 +128,35 @@ def test_pdf_compress_sem_gs_levanta(monkeypatch, pdf_factory, tmp_path):
 
 
 def test_save_upload_grava_pdf(tmp_path, monkeypatch):
+    monkeypatch.setattr(renomear, "_UPLOAD_DIR", str(tmp_path))
     full = renomear.save_upload("Documento.pdf", b"%PDF-1.4 fake")
     assert os.path.isfile(full)
     assert full.lower().endswith(".pdf")
     with open(full, "rb") as f:
         assert f.read() == b"%PDF-1.4 fake"
 
-def test_save_upload_acrescenta_extensao():
+def test_save_upload_acrescenta_extensao(tmp_path, monkeypatch):
+    monkeypatch.setattr(renomear, "_UPLOAD_DIR", str(tmp_path))
     full = renomear.save_upload("semext", b"x")
     assert full.lower().endswith(".pdf")
+
+
+def test_pdf_merge_agrupa_por_pasta(pdf_factory, tmp_path):
+    a = pdf_factory("a.pdf", 1)
+    b = pdf_factory("b.pdf", 1)
+    out = str(tmp_path / "g.pdf")
+    items = [{"path": a, "title": "A", "group": "Pasta X"},
+             {"path": b, "title": "B", "group": "Pasta X"}]
+    renomear.pdf_merge(items, out, "folder")
+    # 1 marcador-pai (grupo) + 2 filhos = 3 itens no total
+    assert _count_outline(out) == 3
+
+def test_backup_for_undo_copia_e_restaura(pdf_factory, tmp_path):
+    src = pdf_factory("orig.pdf", 2)
+    bak = renomear._backup_for_undo(src)
+    try:
+        assert os.path.isfile(bak)
+        assert os.path.getsize(bak) == os.path.getsize(src)
+    finally:
+        if os.path.isfile(bak):
+            os.remove(bak)

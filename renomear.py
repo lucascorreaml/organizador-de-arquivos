@@ -644,7 +644,11 @@ def resolve_ghostscript():
 
 
 def pdf_compress(src, out, quality="balance"):
-    """Comprime `src` em `out` via Ghostscript. quality: max | balance | high."""
+    """Comprime `src` em `out` via Ghostscript.
+
+    quality: 'max' (maxima compressao, /screen), 'balance' (/ebook),
+    'high' (alta qualidade, /printer).
+    """
     if not src or not os.path.isfile(src):
         raise ValueError("PDF nao encontrado.")
     gs = resolve_ghostscript()
@@ -659,6 +663,10 @@ def pdf_compress(src, out, quality="balance"):
     proc = subprocess.run(cmd, capture_output=True,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if proc.returncode != 0 or not os.path.isfile(tmp):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
         detail = proc.stderr.decode("utf-8", "ignore")[:200] if proc.stderr else ""
         raise ValueError("Falha ao comprimir (Ghostscript). " + detail)
     os.replace(tmp, out)
@@ -682,8 +690,9 @@ def save_upload(name, data):
     safe = suggest_name(os.path.basename(name or "arquivo.pdf")) or "arquivo.pdf"
     if not safe.lower().endswith(".pdf"):
         safe += ".pdf"
-    dest = _unique_name(upload_dir(), safe)
-    full = os.path.join(upload_dir(), dest)
+    udir = upload_dir()
+    dest = _unique_name(udir, safe)
+    full = os.path.join(udir, dest)
     with open(full, "wb") as f:
         f.write(data)
     return full
@@ -693,7 +702,14 @@ def _backup_for_undo(path):
     """Copia `path` para um temporario e devolve o caminho do backup."""
     fd, tmp = tempfile.mkstemp(suffix=".pdf", prefix="renomear_bak_")
     os.close(fd)
-    shutil.copy2(path, tmp)
+    try:
+        shutil.copy2(path, tmp)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return tmp
 
 
