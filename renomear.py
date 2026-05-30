@@ -945,8 +945,12 @@ def pick_path_tk(kind="folder", initialdir=None):
     root.wm_attributes("-topmost", 1)
     root.update()
     ini = initialdir if (initialdir and os.path.isdir(initialdir)) else None
-    if kind in ("file", "anyfile"):
-        if kind == "anyfile":
+    if kind in ("file", "anyfile", "image"):
+        if kind == "image":
+            ft = [("Imagens", "*.jpg *.jpeg *.png *.bmp *.gif *.webp *.tif *.tiff"),
+                  ("Todos os arquivos", "*.*")]
+            ttl = "Escolha a imagem"
+        elif kind == "anyfile":
             ft = [("Todos os arquivos", "*.*"), ("PDF", "*.pdf")]
             ttl = "Escolha o arquivo"
         else:
