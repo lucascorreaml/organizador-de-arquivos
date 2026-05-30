@@ -1608,6 +1608,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <button id="mkPaste" disabled>Colar lista</button>
           <button id="mkDivide" disabled>Dividir por estes</button>
           <button class="btn-primary" id="mkSave" disabled>Salvar marcadores</button>
+          <button id="mkExportTxt">Exportar lista (.txt)</button>
         </div>
         <p class="hint">Edite título, página e nível. Use <b>⇥</b>/<b>⇤</b> para mudar o nível e <b>↑</b>/<b>↓</b> para reordenar.</p>
         <div id="mkList"></div>
@@ -2480,6 +2481,16 @@ q("mkDivide").addEventListener("click",()=>{
     if(!r.ok){toast((r.problems&&r.problems[0]&&r.problems[0].reason)||r.error||"Falha ao dividir.");return;}
     toast("✓ "+r.results.length+" PDF(s) gerado(s) na subpasta 'Dividido'.");
   });
+});
+q("mkExportTxt").addEventListener("click",async()=>{
+  if(!MK.pdf){toast("Escolha um PDF primeiro.");return;}
+  const r=await api("/api/pdf-outline-txt",{path:MK.pdf});
+  if(!r.ok){toast(r.error||"Falha ao exportar.");return;}
+  const blob=new Blob([r.content],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=(MK.name||"marcadores")+" - marcadores.txt";
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+  toast("Lista de marcadores baixada.");
 });
 mkRender();
 
