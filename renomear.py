@@ -3156,13 +3156,16 @@ q("ipI2PGo").addEventListener("click",async()=>{
 });
 ipRender();
 const PI={pdf:null,name:"",fromUpload:false};
-function piUpd(){q("ipP2IGo").disabled=!PI.pdf;}
+function piUpd(){q("ipP2IGo").disabled=!PI.pdf||PI.fromUpload;}
 async function piLoad(path,name,fromUpload){
   const r=await api("/api/pdf-info",{path});
   if(!r.ok){toast(r.error||"PDF invalido.");return;}
   PI.pdf=path;PI.name=r.name;PI.fromUpload=!!fromUpload;
   q("ipPdfPath").textContent=r.name+" ("+r.pages+" páginas)";q("ipPdfPath").title=path;
-  q("ipP2ICount").textContent="Pronto.";piUpd();
+  q("ipP2ICount").textContent=PI.fromUpload
+    ?"Para gerar imagens (vários arquivos), use o botão \"Escolher PDF\" (um PDF salvo no computador), não arrastar."
+    :"Pronto.";
+  piUpd();
 }
 q("ipPdfPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;piLoad(r.path,baseName(r.path),false);});
 makeDrop(q("ipPdfDrop"),(p,n)=>piLoad(p,n,true));
