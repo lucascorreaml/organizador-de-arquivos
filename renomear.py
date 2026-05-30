@@ -837,6 +837,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if urlparse(self.path).path == "/api/upload":
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length) if length else b""
+                name = parse_qs(urlparse(self.path).query).get("name", ["arquivo.pdf"])[0]
+                try:
+                    full = save_upload(name, raw)
+                    self._send(200, {"ok": True, "path": full, "name": os.path.basename(full)})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+                return
+
             data = self._read_json()
 
             if self.path == "/api/choose-folder":
@@ -950,6 +961,69 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, pdf_split(pdf, dest, data.get("ranges", []),
                                           auto_suffix=bool(data.get("auto"))))
 
+            elif self.path == "/api/gs-check":
+                self._send(200, {"available": resolve_ghostscript() is not None})
+
+            elif self.path == "/api/pdf-delete":
+                pdf = data.get("pdf", "")
+                spec = data.get("pages", "")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + " (sem paginas).pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    res = pdf_delete_pages(pdf, spec, out)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-merge":
+                items = data.get("items", [])
+                out = (data.get("out") or "").strip()
+                mode = data.get("mode", "file")
+                if not out:
+                    self._send(200, {"ok": False, "error": "Caminho de saida nao informado."})
+                    return
+                if not out.lower().endswith(".pdf"):
+                    out += ".pdf"
+                try:
+                    self._send(200, pdf_merge(items, out, mode))
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-compress":
+                pdf = data.get("pdf", "")
+                quality = data.get("quality", "balance")
+                overwrite = bool(data.get("overwrite"))
+                try:
+                    info = pdf_info(pdf)
+                    folder, base = info["folder"], os.path.splitext(info["name"])[0]
+                    out = pdf if overwrite else os.path.join(
+                        folder, _unique_name(folder, base + " (comprimido).pdf"))
+                    backup = _backup_for_undo(pdf) if overwrite else None
+                    res = pdf_compress(pdf, out, quality)
+                    if overwrite and backup:
+                        UNDO_STACK.append({"type": "restore", "folder": folder,
+                                           "target": pdf, "backup": backup})
+                        res["can_undo"] = True
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
+            elif self.path == "/api/pdf-outline-txt":
+                try:
+                    o = pdf_outline(data.get("path", ""))
+                    self._send(200, {"ok": True, "content": outline_to_txt(o["bookmarks"]),
+                                     "filename": "marcadores.txt"})
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
                     self._send(200, {"ok": False, "error": "Nada para desfazer."})
@@ -985,6 +1059,15 @@ class Handler(BaseHTTPRequestHandler):
                         except OSError:
                             pass
                     msg = f"{n} arquivo(s) movido(s) de volta."
+                elif t == "restore":
+                    target, backup = op.get("target"), op.get("backup")
+                    if backup and os.path.isfile(backup):
+                        shutil.copy2(backup, target)
+                        try:
+                            os.remove(backup)
+                        except OSError:
+                            pass
+                    msg = "Arquivo restaurado."
                 else:
                     self._send(200, {"ok": False, "error": "Operacao desconhecida."})
                     return
