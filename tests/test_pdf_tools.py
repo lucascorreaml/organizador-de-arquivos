@@ -48,3 +48,43 @@ def test_pdf_delete_pages_pdf_inexistente(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         renomear.pdf_delete_pages(str(tmp_path / "nada.pdf"), "1", str(tmp_path / "o.pdf"))
+
+
+def _count_outline(path):
+    from pypdf import PdfReader
+    r = PdfReader(path)
+    n = 0
+    def walk(items):
+        nonlocal n
+        for it in items:
+            if isinstance(it, list):
+                walk(it)
+            else:
+                n += 1
+    walk(r.outline)
+    return n
+
+def test_pdf_merge_soma_paginas(pdf_factory, tmp_path):
+    a = pdf_factory("a.pdf", 2); b = pdf_factory("b.pdf", 3)
+    out = str(tmp_path / "merged.pdf")
+    res = renomear.pdf_merge([{"path": a}, {"path": b}], out, "file")
+    assert res["ok"] and res["pages"] == 5 and res["files"] == 2
+    from pypdf import PdfReader
+    assert len(PdfReader(out).pages) == 5
+
+def test_pdf_merge_marcador_por_arquivo(pdf_factory, tmp_path):
+    a = pdf_factory("a.pdf", 1); b = pdf_factory("b.pdf", 1)
+    out = str(tmp_path / "m.pdf")
+    renomear.pdf_merge([{"path": a, "title": "Doc A"}, {"path": b, "title": "Doc B"}], out, "file")
+    assert _count_outline(out) == 2
+
+def test_pdf_merge_sem_marcadores(pdf_factory, tmp_path):
+    a = pdf_factory("a.pdf", 1); b = pdf_factory("b.pdf", 1)
+    out = str(tmp_path / "m.pdf")
+    renomear.pdf_merge([{"path": a}, {"path": b}], out, "none")
+    assert _count_outline(out) == 0
+
+def test_pdf_merge_vazio(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        renomear.pdf_merge([], str(tmp_path / "x.pdf"), "file")

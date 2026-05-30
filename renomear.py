@@ -559,6 +559,46 @@ def pdf_delete_pages(src, spec, out):
             "removed": total - len(keep), "total": total}
 
 
+def pdf_merge(items, out, bookmark_mode="file"):
+    """Junta varios PDFs (na ordem de `items`) num unico arquivo `out`.
+
+    items: lista de {"path": ..., "title"?: ..., "group"?: ...}
+    bookmark_mode: "file" (1 marcador por arquivo), "folder" (agrupa por pasta
+    de origem: pasta = nivel 1, arquivo = nivel 2) ou "none".
+    """
+    if not items:
+        raise ValueError("Nenhum PDF para juntar.")
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    group_parents = {}
+    files = 0
+    for it in items:
+        path = it.get("path", "")
+        if not path or not os.path.isfile(path):
+            raise ValueError(f"PDF nao encontrado: {path}")
+        reader = PdfReader(path, strict=False)
+        start = len(writer.pages)
+        for pg in reader.pages:
+            writer.add_page(pg)
+        title = (it.get("title") or "").strip() or os.path.splitext(os.path.basename(path))[0]
+        if bookmark_mode == "folder":
+            group = (it.get("group") or os.path.basename(os.path.dirname(os.path.abspath(path)))
+                     or "(raiz)")
+            parent = group_parents.get(group)
+            if parent is None:
+                parent = writer.add_outline_item(group, start)
+                group_parents[group] = parent
+            writer.add_outline_item(title, start, parent=parent)
+        elif bookmark_mode != "none":
+            writer.add_outline_item(title, start)
+        files += 1
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out, "files": files, "pages": len(writer.pages)}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
