@@ -834,6 +834,39 @@ def images_to_pdf(image_paths, out, page_mode="fit"):
     return {"ok": True, "path": out, "pages": len(pages)}
 
 
+GS_IMG_DEVICE = {"png": "png16m", "jpg": "jpeg", "jpeg": "jpeg"}
+
+
+def pdf_to_images(pdf_path, dest_folder, fmt="png", dpi=150):
+    """Rasteriza cada pagina do PDF como imagem (PNG/JPG) via Ghostscript."""
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    gs = resolve_ghostscript()
+    if not gs:
+        raise ValueError("Ghostscript nao encontrado. (Necessario para gerar imagens.)")
+    fmt = (fmt or "png").lower().lstrip(".")
+    device = GS_IMG_DEVICE.get(fmt)
+    if not device:
+        raise ValueError("Formato deve ser PNG ou JPG.")
+    try:
+        dpi = max(20, min(600, int(dpi)))
+    except (TypeError, ValueError):
+        dpi = 150
+    ext = "jpg" if device == "jpeg" else "png"
+    os.makedirs(dest_folder, exist_ok=True)
+    pattern = os.path.join(dest_folder, "pagina-%03d." + ext)
+    cmd = [gs, "-sDEVICE=" + device, "-r" + str(dpi), "-dNOPAUSE", "-dBATCH",
+           "-dQUIET", "-sOutputFile=" + pattern, pdf_path]
+    proc = subprocess.run(cmd, capture_output=True,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    files = sorted(f for f in os.listdir(dest_folder)
+                   if f.lower().startswith("pagina-") and f.lower().endswith("." + ext))
+    if proc.returncode != 0 or not files:
+        detail = proc.stderr.decode("utf-8", "ignore")[:200] if proc.stderr else ""
+        raise ValueError("Falha ao gerar imagens (Ghostscript). " + detail)
+    return {"ok": True, "dest": dest_folder, "count": len(files), "files": files}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------

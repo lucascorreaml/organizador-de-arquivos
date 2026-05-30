@@ -236,3 +236,22 @@ def test_images_to_pdf_vazio(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         renomear.images_to_pdf([], str(tmp_path / "o.pdf"), "fit")
+
+
+def test_pdf_to_images_gera_arquivos(pdf_factory, tmp_path):
+    import pytest
+    if not renomear.resolve_ghostscript():
+        pytest.skip("Ghostscript nao encontrado.")
+    src = pdf_factory("s.pdf", 3)
+    d = str(tmp_path / "imgs")
+    res = renomear.pdf_to_images(src, d, "png", 96)
+    assert res["ok"] and res["count"] == 3
+    assert all(f.lower().endswith(".png") for f in res["files"])
+
+def test_pdf_to_images_formato_invalido(pdf_factory, tmp_path):
+    import pytest
+    if not renomear.resolve_ghostscript():
+        pytest.skip("Ghostscript nao encontrado.")
+    src = pdf_factory("s.pdf", 1)
+    with pytest.raises(ValueError):
+        renomear.pdf_to_images(src, str(tmp_path / "x"), "gif", 96)
