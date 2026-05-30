@@ -3178,6 +3178,44 @@ q("ipP2IGo").addEventListener("click",async()=>{
 piUpd();
 
 // ===================================================================
+//  SENHA
+// ===================================================================
+const PW={pdf:null,name:"",fromUpload:false};
+function pwUpd(){
+  q("pwGo").disabled=!(PW.pdf&&q("pwPass").value);
+  const ov=q("pwOver");if(ov)ov.disabled=PW.fromUpload;
+  q("pwUndo").disabled=!canUndo;
+  const mode=(document.querySelector(\'input[name=pwMode]:checked\')||{}).value||"protect";
+  q("pwLbl").textContent=mode==="remove"?"Senha atual":"Nova senha";
+}
+async function pwLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  PW.pdf=path;PW.name=r.name;PW.fromUpload=!!fromUpload;
+  q("pwPath").textContent=r.name;q("pwPath").title=path;q("pwCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector(\'input[name=pwSave][value=new]\');if(m)m.checked=true;}
+  pwUpd();
+}
+q("pwPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;pwLoad(r.path,baseName(r.path),false);});
+makeDrop(q("pwDrop"),(p,n)=>pwLoad(p,n,true));
+q("pwPass").addEventListener("input",pwUpd);
+document.querySelectorAll(\'input[name=pwMode]\').forEach(r=>r.addEventListener("change",pwUpd));
+q("pwUndo").addEventListener("click",undoLast);
+q("pwGo").addEventListener("click",async()=>{
+  const mode=(document.querySelector(\'input[name=pwMode]:checked\')||{}).value||"protect";
+  const overwrite=(document.querySelector(\'input[name=pwSave]:checked\')||{}).value==="over" && !PW.fromUpload;
+  q("pwGo").disabled=true;q("pwGo").textContent="Aplicando…";
+  const r=await api("/api/pdf-password",{pdf:PW.pdf,mode,password:q("pwPass").value,overwrite});
+  q("pwGo").textContent="Aplicar";
+  if(!r.ok){toast(r.error||"Falha.");pwUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("pwResult").innerHTML=\'<p class="hint">✓ \'+(mode==="remove"?"Senha removida.":"PDF protegido.")+\' \'
+    +(PW.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+\'</p>\';
+  pwUpd();
+});
+pwUpd();
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
