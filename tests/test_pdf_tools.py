@@ -255,3 +255,28 @@ def test_pdf_to_images_formato_invalido(pdf_factory, tmp_path):
     src = pdf_factory("s.pdf", 1)
     with pytest.raises(ValueError):
         renomear.pdf_to_images(src, str(tmp_path / "x"), "gif", 96)
+
+
+def test_pdf_set_and_remove_password(pdf_factory, tmp_path):
+    src = pdf_factory("s.pdf", 2)
+    prot = str(tmp_path / "prot.pdf")
+    renomear.pdf_set_password(src, prot, "segredo")
+    from pypdf import PdfReader
+    assert PdfReader(prot).is_encrypted
+    out = str(tmp_path / "open.pdf")
+    renomear.pdf_remove_password(prot, out, "segredo")
+    assert not PdfReader(out).is_encrypted
+
+def test_pdf_remove_password_errada(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 1)
+    prot = str(tmp_path / "p.pdf")
+    renomear.pdf_set_password(src, prot, "abc")
+    with pytest.raises(ValueError):
+        renomear.pdf_remove_password(prot, str(tmp_path / "o.pdf"), "errada")
+
+def test_pdf_set_password_vazia(pdf_factory, tmp_path):
+    import pytest
+    src = pdf_factory("s.pdf", 1)
+    with pytest.raises(ValueError):
+        renomear.pdf_set_password(src, str(tmp_path / "o.pdf"), "")

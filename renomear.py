@@ -867,6 +867,47 @@ def pdf_to_images(pdf_path, dest_folder, fmt="png", dpi=150):
     return {"ok": True, "dest": dest_folder, "count": len(files), "files": files}
 
 
+def pdf_set_password(pdf_path, out, password):
+    """Gera `out` criptografado com `password` (senha de abertura)."""
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    if not password:
+        raise ValueError("Informe uma senha.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(pdf_path, strict=False)
+    if reader.is_encrypted:
+        raise ValueError("Este PDF ja esta protegido.")
+    writer = PdfWriter()
+    writer.append(reader)
+    try:
+        writer.encrypt(user_password=password, algorithm="AES-256")
+    except Exception:
+        writer.encrypt(user_password=password)
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out}
+
+
+def pdf_remove_password(pdf_path, out, password):
+    """Gera `out` sem senha. Levanta ValueError se a senha estiver incorreta."""
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(pdf_path, strict=False)
+    if reader.is_encrypted:
+        if not reader.decrypt(password or ""):
+            raise ValueError("Senha incorreta.")
+    writer = PdfWriter()
+    writer.append(reader)
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        writer.write(f)
+    os.replace(tmp, out)
+    return {"ok": True, "path": out}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------
