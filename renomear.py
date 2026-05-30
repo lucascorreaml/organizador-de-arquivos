@@ -3108,6 +3108,76 @@ q("poGo").addEventListener("click",async()=>{
 });
 
 // ===================================================================
+//  IMAGENS <-> PDF
+// ===================================================================
+const IMGRE=/\.(jpe?g|png|bmp|gif|webp|tiff?)$/i;
+document.querySelectorAll(\'input[name=ipDir]\').forEach(r=>r.addEventListener("change",()=>{
+  const d=(document.querySelector(\'input[name=ipDir]:checked\')||{}).value||"i2p";
+  q("ipI2P").style.display=d==="i2p"?"block":"none";
+  q("ipP2I").style.display=d==="p2i"?"block":"none";
+}));
+const IP={imgs:[]}; // {path,name}
+function ipRender(){
+  const box=q("ipImgList");
+  if(!IP.imgs.length){box.innerHTML=\'<div class="empty">Nenhuma imagem.</div>\';ipUpd();return;}
+  box.innerHTML=IP.imgs.map((it,i)=>(
+    \'<div class="mglist-row"><span class="pg">#\'+(i+1)+\'</span>\'
+    +\'<span class="nm">\'+esc(it.name)+\'</span>\'
+    +\'<button class="btn-link" data-up="\'+i+\'" \'+(i===0?\'disabled\':\'\')+\'>↑</button>\'
+    +\'<button class="btn-link" data-down="\'+i+\'" \'+(i===IP.imgs.length-1?\'disabled\':\'\')+\'>↓</button>\'
+    +\'<button class="btn-link" data-del="\'+i+\'">remover</button></div>\')).join("");
+  box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[IP.imgs[i-1],IP.imgs[i]]=[IP.imgs[i],IP.imgs[i-1]];ipRender();}));
+  box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[IP.imgs[i+1],IP.imgs[i]]=[IP.imgs[i],IP.imgs[i+1]];ipRender();}));
+  box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{IP.imgs.splice(+b.dataset.del,1);ipRender();}));
+  ipUpd();
+}
+function ipUpd(){
+  q("ipI2PGo").disabled=!IP.imgs.length;
+  q("ipClear").disabled=!IP.imgs.length;
+  q("ipI2PCount").textContent=IP.imgs.length?(IP.imgs.length+" imagem(ns)."):"Adicione ao menos 1 imagem.";
+}
+function ipAdd(path,name){IP.imgs.push({path,name:name||baseName(path)});ipRender();}
+q("ipAddImg").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"image"});if(r.cancelled||!r.path)return;ipAdd(r.path,baseName(r.path));});
+makeDrop(q("ipImgDrop"),(p,n)=>ipAdd(p,n),IMGRE);
+q("ipClear").addEventListener("click",()=>{IP.imgs=[];ipRender();});
+q("ipI2PGo").addEventListener("click",async()=>{
+  const mode=(document.querySelector(\'input[name=ipPage]:checked\')||{}).value||"fit";
+  let name=(q("ipOutName").value||"Imagens.pdf").trim();
+  const firstReal=IP.imgs.find(it=>!/renomear_up_/.test(it.path));
+  const baseItem=firstReal||IP.imgs[0];
+  const folder=baseItem?baseItem.path.replace(/[\\/][^\\/]+$/,""):"";
+  const out=(folder?folder+"\\\\":"")+name;
+  q("ipI2PGo").disabled=true;q("ipI2PGo").textContent="Gerando…";
+  const r=await api("/api/images-to-pdf",{images:IP.imgs.map(it=>it.path),out,mode});
+  q("ipI2PGo").textContent="Gerar PDF";ipUpd();
+  if(!r.ok){toast(r.error||"Falha ao gerar PDF.");return;}
+  q("ipI2PResult").innerHTML=\'<p class="hint">✓ PDF com \'+r.pages+\' página(s). \'
+    +(firstReal?"Salvo em: "+esc(baseName(r.path)):downloadLink(r.path,"baixar PDF"))+\'</p>\';
+});
+ipRender();
+const PI={pdf:null,name:"",fromUpload:false};
+function piUpd(){q("ipP2IGo").disabled=!PI.pdf;}
+async function piLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  PI.pdf=path;PI.name=r.name;PI.fromUpload=!!fromUpload;
+  q("ipPdfPath").textContent=r.name+" ("+r.pages+" páginas)";q("ipPdfPath").title=path;
+  q("ipP2ICount").textContent="Pronto.";piUpd();
+}
+q("ipPdfPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;piLoad(r.path,baseName(r.path),false);});
+makeDrop(q("ipPdfDrop"),(p,n)=>piLoad(p,n,true));
+q("ipP2IGo").addEventListener("click",async()=>{
+  const fmt=q("ipFmt").value||"png",dpi=parseInt(q("ipDpi").value||"150",10);
+  q("ipP2IGo").disabled=true;q("ipP2IGo").textContent="Gerando…";
+  const dest=PI.fromUpload?"":PI.pdf.replace(/[\\/][^\\/]+$/,"");
+  const r=await api("/api/pdf-to-images",{pdf:PI.pdf,dest,subfolder:"Imagens",fmt,dpi});
+  q("ipP2IGo").textContent="Gerar imagens";piUpd();
+  if(!r.ok){toast(r.error||"Falha ao gerar imagens.");return;}
+  q("ipP2IResult").innerHTML=\'<p class="hint">✓ \'+r.count+\' imagem(ns) gerada(s) na subpasta "Imagens".</p>\';
+});
+piUpd();
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
