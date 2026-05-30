@@ -2484,6 +2484,45 @@ q("mkDivide").addEventListener("click",()=>{
 mkRender();
 
 // ===================================================================
+//  EXCLUIR PAGINAS
+// ===================================================================
+const DP={pdf:null,name:"",pages:0,fromUpload:false};
+function dpUpd(){
+  const hasSpec=q("dpPages").value.trim()!=="";
+  q("dpGo").disabled=!(DP.pdf&&hasSpec);
+  q("dpOver").disabled=DP.fromUpload;
+  q("dpUndo").disabled=!canUndo;
+}
+async function dpLoad(path,name,fromUpload){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  DP.pdf=path;DP.name=r.name;DP.pages=r.pages;DP.fromUpload=!!fromUpload;
+  q("dpPath").textContent=r.name;q("dpPath").title=path;
+  q("dpInfo").textContent="O PDF tem "+r.pages+" página(s).";
+  q("dpCount").textContent="Pronto.";
+  if(fromUpload){const m=document.querySelector('input[name=dpMode][value=new]');if(m)m.checked=true;}
+  dpUpd();
+}
+q("dpPick").addEventListener("click",async()=>{
+  const r=await api("/api/choose-file",{kind:"file"});
+  if(r.cancelled||!r.path)return;dpLoad(r.path,baseName(r.path),false);
+});
+makeDrop(q("dpDrop"),(p,n)=>dpLoad(p,n,true));
+q("dpPages").addEventListener("input",dpUpd);
+q("dpUndo").addEventListener("click",undoLast);
+q("dpGo").addEventListener("click",async()=>{
+  const overwrite=(document.querySelector('input[name=dpMode]:checked')||{}).value==="over" && !DP.fromUpload;
+  q("dpGo").disabled=true;q("dpGo").textContent="Excluindo…";
+  const r=await api("/api/pdf-delete",{pdf:DP.pdf,pages:q("dpPages").value,overwrite});
+  q("dpGo").textContent="Excluir páginas";
+  if(!r.ok){toast(r.error||"Falha.");dpUpd();return;}
+  setCanUndo(!!r.can_undo);
+  q("dpResult").innerHTML='<p class="hint">✓ Geradas '+r.kept+' página(s) (removidas '+r.removed+'). '
+    +(DP.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
+  dpUpd();
+});
+
+// ===================================================================
 //  Desfazer global + Modal
 // ===================================================================
 async function undoLast(){
