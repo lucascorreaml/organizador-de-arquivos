@@ -3069,14 +3069,14 @@ function poUpd(){
 }
 function poRender(){
   const box=q("poList");
-  if(!PO.items.length){box.innerHTML=\'<div class="empty">Nenhuma página.</div>\';poUpd();return;}
+  if(!PO.items.length){box.innerHTML='<div class="empty">Nenhuma página.</div>';poUpd();return;}
   box.innerHTML=PO.items.map((it,i)=>(
-    \'<div class="mglist-row">\'
-    +\'<span class="nm">Página \'+(it.src+1)+\' <span class="pg">(giro: \'+it.rotate+\'°)</span></span>\'
-    +\'<button class="btn-link" data-up="\'+i+\'" \'+(i===0?\'disabled\':\'\')+\'>↑</button>\'
-    +\'<button class="btn-link" data-down="\'+i+\'" \'+(i===PO.items.length-1?\'disabled\':\'\')+\'>↓</button>\'
-    +\'<button class="btn-link" data-rot="\'+i+\'">↻ girar</button>\'
-    +\'</div>\')).join("");
+    '<div class="mglist-row">'
+    +'<span class="nm">Página '+(it.src+1)+' <span class="pg">(giro: '+it.rotate+'°)</span></span>'
+    +'<button class="btn-link" data-up="'+i+'" '+(i===0?'disabled':'')+'>↑</button>'
+    +'<button class="btn-link" data-down="'+i+'" '+(i===PO.items.length-1?'disabled':'')+'>↓</button>'
+    +'<button class="btn-link" data-rot="'+i+'">↻ girar</button>'
+    +'</div>')).join("");
   box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[PO.items[i-1],PO.items[i]]=[PO.items[i],PO.items[i-1]];poRender();}));
   box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[PO.items[i+1],PO.items[i]]=[PO.items[i],PO.items[i+1]];poRender();}));
   box.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.rot;PO.items[i].rotate=(PO.items[i].rotate+90)%360;poRender();}));
@@ -3089,21 +3089,21 @@ async function poLoad(path,name,fromUpload){
   PO.items=Array.from({length:r.pages},(_,i)=>({src:i,rotate:0}));
   q("poPath").textContent=r.name+" ("+r.pages+" páginas)";q("poPath").title=path;
   q("poCount").textContent="Pronto.";
-  if(fromUpload){const m=document.querySelector(\'input[name=poMode][value=new]\');if(m)m.checked=true;}
+  if(fromUpload){const m=document.querySelector('input[name=poMode][value=new]');if(m)m.checked=true;}
   poRender();
 }
 q("poPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;poLoad(r.path,baseName(r.path),false);});
 makeDrop(q("poDrop"),(p,n)=>poLoad(p,n,true));
 q("poUndo").addEventListener("click",undoLast);
 q("poGo").addEventListener("click",async()=>{
-  const overwrite=(document.querySelector(\'input[name=poMode]:checked\')||{}).value==="over" && !PO.fromUpload;
+  const overwrite=(document.querySelector('input[name=poMode]:checked')||{}).value==="over" && !PO.fromUpload;
   q("poGo").disabled=true;q("poGo").textContent="Aplicando…";
   const r=await api("/api/pdf-rearrange",{pdf:PO.pdf,ops:PO.items,overwrite});
   q("poGo").textContent="Aplicar";
   if(!r.ok){toast(r.error||"Falha.");poUpd();return;}
   setCanUndo(!!r.can_undo);
-  q("poResult").innerHTML=\'<p class="hint">✓ PDF gerado (\'+r.pages+\' páginas). \'
-    +(PO.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+\'</p>\';
+  q("poResult").innerHTML='<p class="hint">✓ PDF gerado ('+r.pages+' páginas). '
+    +(PO.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
   poUpd();
 });
 
@@ -3111,21 +3111,21 @@ q("poGo").addEventListener("click",async()=>{
 //  IMAGENS <-> PDF
 // ===================================================================
 const IMGRE=/\.(jpe?g|png|bmp|gif|webp|tiff?)$/i;
-document.querySelectorAll(\'input[name=ipDir]\').forEach(r=>r.addEventListener("change",()=>{
-  const d=(document.querySelector(\'input[name=ipDir]:checked\')||{}).value||"i2p";
+document.querySelectorAll('input[name=ipDir]').forEach(r=>r.addEventListener("change",()=>{
+  const d=(document.querySelector('input[name=ipDir]:checked')||{}).value||"i2p";
   q("ipI2P").style.display=d==="i2p"?"block":"none";
   q("ipP2I").style.display=d==="p2i"?"block":"none";
 }));
 const IP={imgs:[]}; // {path,name}
 function ipRender(){
   const box=q("ipImgList");
-  if(!IP.imgs.length){box.innerHTML=\'<div class="empty">Nenhuma imagem.</div>\';ipUpd();return;}
+  if(!IP.imgs.length){box.innerHTML='<div class="empty">Nenhuma imagem.</div>';ipUpd();return;}
   box.innerHTML=IP.imgs.map((it,i)=>(
-    \'<div class="mglist-row"><span class="pg">#\'+(i+1)+\'</span>\'
-    +\'<span class="nm">\'+esc(it.name)+\'</span>\'
-    +\'<button class="btn-link" data-up="\'+i+\'" \'+(i===0?\'disabled\':\'\')+\'>↑</button>\'
-    +\'<button class="btn-link" data-down="\'+i+\'" \'+(i===IP.imgs.length-1?\'disabled\':\'\')+\'>↓</button>\'
-    +\'<button class="btn-link" data-del="\'+i+\'">remover</button></div>\')).join("");
+    '<div class="mglist-row"><span class="pg">#'+(i+1)+'</span>'
+    +'<span class="nm">'+esc(it.name)+'</span>'
+    +'<button class="btn-link" data-up="'+i+'" '+(i===0?'disabled':'')+'>↑</button>'
+    +'<button class="btn-link" data-down="'+i+'" '+(i===IP.imgs.length-1?'disabled':'')+'>↓</button>'
+    +'<button class="btn-link" data-del="'+i+'">remover</button></div>')).join("");
   box.querySelectorAll("[data-up]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.up;[IP.imgs[i-1],IP.imgs[i]]=[IP.imgs[i],IP.imgs[i-1]];ipRender();}));
   box.querySelectorAll("[data-down]").forEach(b=>b.addEventListener("click",()=>{const i=+b.dataset.down;[IP.imgs[i+1],IP.imgs[i]]=[IP.imgs[i],IP.imgs[i+1]];ipRender();}));
   box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{IP.imgs.splice(+b.dataset.del,1);ipRender();}));
@@ -3141,7 +3141,7 @@ q("ipAddImg").addEventListener("click",async()=>{const r=await api("/api/choose-
 makeDrop(q("ipImgDrop"),(p,n)=>ipAdd(p,n),IMGRE);
 q("ipClear").addEventListener("click",()=>{IP.imgs=[];ipRender();});
 q("ipI2PGo").addEventListener("click",async()=>{
-  const mode=(document.querySelector(\'input[name=ipPage]:checked\')||{}).value||"fit";
+  const mode=(document.querySelector('input[name=ipPage]:checked')||{}).value||"fit";
   let name=(q("ipOutName").value||"Imagens.pdf").trim();
   const firstReal=IP.imgs.find(it=>!/renomear_up_/.test(it.path));
   const baseItem=firstReal||IP.imgs[0];
@@ -3151,8 +3151,8 @@ q("ipI2PGo").addEventListener("click",async()=>{
   const r=await api("/api/images-to-pdf",{images:IP.imgs.map(it=>it.path),out,mode});
   q("ipI2PGo").textContent="Gerar PDF";ipUpd();
   if(!r.ok){toast(r.error||"Falha ao gerar PDF.");return;}
-  q("ipI2PResult").innerHTML=\'<p class="hint">✓ PDF com \'+r.pages+\' página(s). \'
-    +(firstReal?"Salvo em: "+esc(baseName(r.path)):downloadLink(r.path,"baixar PDF"))+\'</p>\';
+  q("ipI2PResult").innerHTML='<p class="hint">✓ PDF com '+r.pages+' página(s). '
+    +(firstReal?"Salvo em: "+esc(baseName(r.path)):downloadLink(r.path,"baixar PDF"))+'</p>';
 });
 ipRender();
 const PI={pdf:null,name:"",fromUpload:false};
@@ -3173,7 +3173,7 @@ q("ipP2IGo").addEventListener("click",async()=>{
   const r=await api("/api/pdf-to-images",{pdf:PI.pdf,dest,subfolder:"Imagens",fmt,dpi});
   q("ipP2IGo").textContent="Gerar imagens";piUpd();
   if(!r.ok){toast(r.error||"Falha ao gerar imagens.");return;}
-  q("ipP2IResult").innerHTML=\'<p class="hint">✓ \'+r.count+\' imagem(ns) gerada(s) na subpasta "Imagens".</p>\';
+  q("ipP2IResult").innerHTML='<p class="hint">✓ '+r.count+' imagem(ns) gerada(s) na subpasta "Imagens".</p>';
 });
 piUpd();
 
@@ -3185,7 +3185,7 @@ function pwUpd(){
   q("pwGo").disabled=!(PW.pdf&&q("pwPass").value);
   const ov=q("pwOver");if(ov)ov.disabled=PW.fromUpload;
   q("pwUndo").disabled=!canUndo;
-  const mode=(document.querySelector(\'input[name=pwMode]:checked\')||{}).value||"protect";
+  const mode=(document.querySelector('input[name=pwMode]:checked')||{}).value||"protect";
   q("pwLbl").textContent=mode==="remove"?"Senha atual":"Nova senha";
 }
 async function pwLoad(path,name,fromUpload){
@@ -3193,24 +3193,24 @@ async function pwLoad(path,name,fromUpload){
   if(!r.ok){toast(r.error||"PDF invalido.");return;}
   PW.pdf=path;PW.name=r.name;PW.fromUpload=!!fromUpload;
   q("pwPath").textContent=r.name;q("pwPath").title=path;q("pwCount").textContent="Pronto.";
-  if(fromUpload){const m=document.querySelector(\'input[name=pwSave][value=new]\');if(m)m.checked=true;}
+  if(fromUpload){const m=document.querySelector('input[name=pwSave][value=new]');if(m)m.checked=true;}
   pwUpd();
 }
 q("pwPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;pwLoad(r.path,baseName(r.path),false);});
 makeDrop(q("pwDrop"),(p,n)=>pwLoad(p,n,true));
 q("pwPass").addEventListener("input",pwUpd);
-document.querySelectorAll(\'input[name=pwMode]\').forEach(r=>r.addEventListener("change",pwUpd));
+document.querySelectorAll('input[name=pwMode]').forEach(r=>r.addEventListener("change",pwUpd));
 q("pwUndo").addEventListener("click",undoLast);
 q("pwGo").addEventListener("click",async()=>{
-  const mode=(document.querySelector(\'input[name=pwMode]:checked\')||{}).value||"protect";
-  const overwrite=(document.querySelector(\'input[name=pwSave]:checked\')||{}).value==="over" && !PW.fromUpload;
+  const mode=(document.querySelector('input[name=pwMode]:checked')||{}).value||"protect";
+  const overwrite=(document.querySelector('input[name=pwSave]:checked')||{}).value==="over" && !PW.fromUpload;
   q("pwGo").disabled=true;q("pwGo").textContent="Aplicando…";
   const r=await api("/api/pdf-password",{pdf:PW.pdf,mode,password:q("pwPass").value,overwrite});
   q("pwGo").textContent="Aplicar";
   if(!r.ok){toast(r.error||"Falha.");pwUpd();return;}
   setCanUndo(!!r.can_undo);
-  q("pwResult").innerHTML=\'<p class="hint">✓ \'+(mode==="remove"?"Senha removida.":"PDF protegido.")+\' \'
-    +(PW.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+\'</p>\';
+  q("pwResult").innerHTML='<p class="hint">✓ '+(mode==="remove"?"Senha removida.":"PDF protegido.")+' '
+    +(PW.fromUpload?downloadLink(r.path,"baixar resultado"):"Salvo em: "+esc(baseName(r.path)))+'</p>';
   pwUpd();
 });
 pwUpd();
