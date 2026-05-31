@@ -1648,6 +1648,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab" data-tab="organize">Organizar</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="export">Exportar lista</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="pdf">Extrair Páginas</button> <span class="tabsep">|</span>
+    <button class="tab" data-tab="text">Extrair Texto</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="delpages">Excluir Páginas</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="divide">Dividir PDF</button> <span class="tabsep">|</span>
     <button class="tab" data-tab="merge">Juntar PDF</button> <span class="tabsep">|</span>
@@ -2161,6 +2162,21 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button id="pwGo" disabled class="btn-primary">Aplicar</button>
     </div>
     <div id="pwResult"></div>
+  </section>
+
+  <!-- ===== EXTRAIR TEXTO ===== -->
+  <section class="panel" id="panel-text">
+    <div class="toolbar">
+      <button class="btn-primary" id="txtPick">Escolher PDF</button>
+      <span class="pathbox" id="txtPath">Nenhum PDF selecionado</span>
+    </div>
+    <div class="drop" id="txtDrop">Arraste um PDF aqui</div>
+    <p class="hint">Extrai o texto de PDFs digitais (não escaneados). PDFs escaneados precisam de OCR.</p>
+    <div class="actionbar">
+      <span class="count" id="txtCount">Escolha um PDF.</span>
+      <button id="txtGo" disabled class="btn-primary">Extrair texto (.txt)</button>
+    </div>
+    <div id="txtResult"></div>
   </section>
 
   <!-- ===== COMPARAR ARQUIVOS ===== -->
@@ -3252,6 +3268,38 @@ q("pwGo").addEventListener("click",async()=>{
   pwUpd();
 });
 pwUpd();
+
+// ===================================================================
+//  EXTRAIR TEXTO
+// ===================================================================
+const TX={pdf:null,name:""};
+function txtUpd(){q("txtGo").disabled=!TX.pdf;}
+async function txtLoad(path,name){
+  const r=await api("/api/pdf-info",{path});
+  if(!r.ok){toast(r.error||"PDF invalido.");return;}
+  TX.pdf=path;TX.name=r.name;
+  q("txtPath").textContent=r.name+" ("+r.pages+" páginas)";q("txtPath").title=path;
+  q("txtCount").textContent="Pronto.";q("txtResult").innerHTML="";txtUpd();
+}
+q("txtPick").addEventListener("click",async()=>{const r=await api("/api/choose-file",{kind:"file"});if(r.cancelled||!r.path)return;txtLoad(r.path,baseName(r.path));});
+makeDrop(q("txtDrop"),(p,n)=>txtLoad(p,n));
+q("txtGo").addEventListener("click",async()=>{
+  q("txtGo").disabled=true;q("txtGo").textContent="Extraindo…";
+  const r=await api("/api/pdf-extract-text",{path:TX.pdf});
+  q("txtGo").textContent="Extrair texto (.txt)";txtUpd();
+  if(!r.ok){toast(r.error||"Falha ao extrair texto.");return;}
+  if(!r.has_text){
+    q("txtResult").innerHTML='<p class="hint"><b>Este PDF não tem texto selecionável</b> (provavelmente escaneado). Seria preciso OCR.</p>';
+    toast("Sem texto selecionável (PDF escaneado?).");
+    return;
+  }
+  const blob=new Blob([r.content],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=r.filename;
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+  q("txtResult").innerHTML='<p class="hint">✓ Texto extraído ('+r.pages+' páginas).</p>';
+  toast("Texto baixado.");
+});
+txtUpd();
 
 // ===================================================================
 //  Desfazer global + Modal
