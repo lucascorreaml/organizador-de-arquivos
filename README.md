@@ -26,6 +26,7 @@ O app é organizado em abas:
 | Aba | O que faz |
 |---|---|
 | **Extrair Páginas** | Abre um PDF (com pré‑visualização) e **extrai faixas de páginas** em vários arquivos, com até 250 cortes de uma vez. |
+| **Extrair Texto** | Extrai a **camada de texto** de PDFs **digitais** (não escaneados) e baixa um `.txt`, com marcador de página. Não faz OCR. |
 | **Excluir Páginas** | **Remove páginas específicas** (ex.: `1, 3, 5‑8`); salva como novo arquivo ou sobrescreve o original (com desfazer). |
 | **Dividir PDF** | Divisão automática: a cada X páginas, em N partes iguais, uma página por arquivo, **por capítulos (marcadores)** ou **por tamanho (MB)** — gerando partes abaixo de um limite (ótimo para limites de upload). |
 | **Juntar PDF** | Junta vários PDFs numa ordem definida (lista reordenável), com **marcadores** (um por arquivo, agrupados por pasta de origem, ou nenhum). |
