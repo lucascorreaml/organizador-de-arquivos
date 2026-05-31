@@ -4,7 +4,7 @@ Aplicativo **local** para **renomear, organizar e trabalhar com arquivos, pastas
 
 > Feito em **Python** + **HTML**. Empacotado como `.exe` autossuficiente: as dependências (**pypdf**, **Pillow** e o **Ghostscript**) já vêm **embutidas** — não é preciso instalar nada.
 
-**Versão atual: 1.5**
+**Versão atual: 1.6**
 
 ---
 
