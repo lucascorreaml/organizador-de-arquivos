@@ -1354,6 +1354,16 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._send(200, {"ok": False, "error": str(e)})
 
+            elif self.path == "/api/pdf-extract-text":
+                try:
+                    info = pdf_info(data.get("path", ""))
+                    base = os.path.splitext(info["name"])[0]
+                    res = pdf_extract_text(data.get("path", ""))
+                    res["filename"] = base + ".txt"
+                    self._send(200, res)
+                except Exception as e:
+                    self._send(200, {"ok": False, "error": str(e)})
+
             elif self.path == "/api/undo":
                 if not UNDO_STACK:
                     self._send(200, {"ok": False, "error": "Nada para desfazer."})
