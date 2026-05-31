@@ -1,3 +1,4 @@
 pypdf>=6
 pytest>=8
 pillow>=10
+reportlab>=4

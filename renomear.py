@@ -926,6 +926,31 @@ def pdf_remove_password(pdf_path, out, password):
     return {"ok": True, "path": out}
 
 
+def pdf_extract_text(pdf_path, page_markers=True):
+    """Extrai a camada de texto de um PDF digital (sem OCR).
+
+    Retorna {ok, content, pages, has_text}. has_text=False quando nenhuma
+    pagina tem texto (provavel PDF escaneado/imagem).
+    """
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise ValueError("PDF nao encontrado.")
+    from pypdf import PdfReader
+    reader = PdfReader(pdf_path, strict=False)
+    total = len(reader.pages)
+    blocks, has_text = [], False
+    for i, page in enumerate(reader.pages, 1):
+        try:
+            txt = (page.extract_text() or "").strip()
+        except Exception:
+            txt = ""
+        if txt:
+            has_text = True
+        body = txt if txt else "(sem texto)"
+        blocks.append(f"--- Página {i} ---\n{body}" if page_markers else body)
+    content = ("\n\n".join(blocks) + "\n") if blocks else ""
+    return {"ok": True, "content": content, "pages": total, "has_text": has_text}
+
+
 # ----------------------------------------------------------------------------
 # Desfazer (pilha generica)
 # ----------------------------------------------------------------------------

@@ -313,3 +313,39 @@ def test_pdf_set_password_ja_protegido(pdf_factory, tmp_path):
     renomear.pdf_set_password(src, prot, "abc")
     with pytest.raises(ValueError):
         renomear.pdf_set_password(prot, str(tmp_path / "o.pdf"), "xyz")
+
+
+def _text_pdf(path, lines):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(path)
+    for ln in lines:
+        c.drawString(72, 720, ln)
+        c.showPage()
+    c.save()
+    return path
+
+def test_pdf_extract_text_branco_sem_texto(pdf_factory):
+    src = pdf_factory("b.pdf", 3)
+    res = renomear.pdf_extract_text(src)
+    assert res["ok"] and res["pages"] == 3 and res["has_text"] is False
+    assert "--- Página 1 ---" in res["content"]
+    assert "--- Página 3 ---" in res["content"]
+    assert "(sem texto)" in res["content"]
+
+def test_pdf_extract_text_com_texto(tmp_path):
+    src = _text_pdf(str(tmp_path / "t.pdf"), ["Texto de teste", "Segunda pagina"])
+    res = renomear.pdf_extract_text(src)
+    assert res["has_text"] is True
+    assert "Texto de teste" in res["content"]
+    assert "--- Página 2 ---" in res["content"]
+
+def test_pdf_extract_text_sem_marcadores(tmp_path):
+    src = _text_pdf(str(tmp_path / "t.pdf"), ["Abc"])
+    res = renomear.pdf_extract_text(src, page_markers=False)
+    assert "--- Página" not in res["content"]
+    assert "Abc" in res["content"]
+
+def test_pdf_extract_text_inexistente(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        renomear.pdf_extract_text(str(tmp_path / "nada.pdf"))
